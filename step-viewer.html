@@ -87,7 +87,7 @@
     height: 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); padding: 0 6px;
   }
   label.inline { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
-  #file-name { color: var(--muted); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; font-weight: 400; }
 
   /* ---------- main layout ---------- */
   main { display: grid; grid-template-columns: 240px 1fr 300px; min-height: 0; }
@@ -98,7 +98,7 @@
   aside.right { border-left: 1px solid var(--border); }
   aside h2 {
     font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted);
-    margin: 0; padding: 10px 12px 6px; display: flex; align-items: center; justify-content: space-between;
+    margin: 0; padding: 10px 12px 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   }
   .section { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
   .empty-note { color: var(--muted); padding: 2px 12px 8px; }
@@ -115,7 +115,7 @@
   .tree li.collapsed > ul { display: none; }
 
   /* info + measurement list */
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; padding: 0 12px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0 0 4px; padding: 0 12px; }
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; font-family: var(--mono); font-size: 12px; text-align: right; overflow-wrap: anywhere; }
   .kv .title { grid-column: 1 / -1; font-weight: 600; margin-bottom: 2px; }
@@ -226,7 +226,6 @@
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/></svg>Open
     </button>
     <input type="file" id="file-input" accept=".step,.stp,.iges,.igs,.brep,.brp" hidden>
-    <span id="file-name"></span>
   </div>
   <span class="sep"></span>
   <div class="segmented" role="group" aria-label="Tool">
@@ -281,7 +280,7 @@
 <main>
   <aside class="left">
     <div class="section">
-      <h2>Model</h2>
+      <h2>Model <span id="file-name"></span></h2>
       <ul class="tree" id="tree"></ul>
       <div class="empty-note" id="tree-empty">No model loaded.</div>
     </div>
@@ -1492,6 +1491,9 @@ function setModel(data, name, ms) {
   state.seq = 0;
   cancelPending();
   setHover(null);
+  state.selectedEntity = null; // its highlight geometry belongs to the old model
+  showEntity(null, hl.facePicked, hl.edgePicked);
+  showInfo(null);
   disposeModel();
   model = data;
   let tris = 0, faces = 0, edges = 0;
@@ -1823,17 +1825,22 @@ function showEntity(ent, faceObj, edgeObj) {
 // ======================================================================
 // Formatting
 // ======================================================================
+// toFixed without "-0.000" for values that round to zero
+function fixed(x, digits) {
+  const s = x.toFixed(digits);
+  return /^-0\.?0*$/.test(s) ? s.slice(1) : s;
+}
 function fmtLen(mm, withUnit = true) {
   const v = mm / UNITS[settings.units];
-  return v.toFixed(settings.precision) + (withUnit ? ' ' + settings.units : '');
+  return fixed(v, settings.precision) + (withUnit ? ' ' + settings.units : '');
 }
 function fmtVec(v, length = true) {
-  return v.map((x) => (length ? (x / UNITS[settings.units]).toFixed(settings.precision) : x.toFixed(4))).join(', ');
+  return v.map((x) => (length ? fixed(x / UNITS[settings.units], settings.precision) : fixed(x, 4))).join(', ');
 }
-function fmtDeg(d) { return d.toFixed(Math.max(1, settings.precision - 1)) + '°'; }
+function fmtDeg(d) { return fixed(d, Math.max(1, settings.precision - 1)) + '°'; }
 function fmtArea(mm2) {
   const f = UNITS[settings.units] ** 2;
-  return (mm2 / f).toFixed(settings.precision) + ' ' + settings.units + '²';
+  return fixed(mm2 / f, settings.precision) + ' ' + settings.units + '²';
 }
 
 const TYPE_NAME = {

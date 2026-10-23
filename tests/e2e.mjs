@@ -176,6 +176,8 @@ await page.waitForFunction((n) => window.stepViewer.model.meshes[0].index.length
 await loadFixture('as1-oc-214.stp');
 const parts = await page.evaluate(() => window.stepViewer.model.meshes.length);
 check(parts === 18, `assembly has 18 parts (got ${parts})`);
+const staleInfo = await page.evaluate(() => document.querySelector('#info').textContent);
+check(staleInfo === '', `selection from the previous model is cleared ("${staleInfo}")`);
 const treeRows = await page.$$eval('#tree .row', (r) => r.length);
 check(treeRows > 5, `model tree populated (${treeRows} rows)`);
 await page.keyboard.press('o');

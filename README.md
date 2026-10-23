@@ -45,7 +45,7 @@ Other controls:
   - Minimum distance involving curved faces is measured on the triangles, so its error is bounded by the tessellation deflection. Use **Quality → Fine** to tighten it (this re-tessellates and clears existing measurements).
   - Toruses and freeform (NURBS) faces are reported as "Freeform face" with their area only.
 - **Colors:** a pure-black file color is treated as "no color" because several exporters write it as a default. **Colors** switches file colors off entirely.
-- **Libraries** (pinned, loaded via the import map): three.js 0.186.1 (WebGL2) and three-mesh-bvh 0.9.16, which handles picking and the closest-point queries.
+- **Libraries** (pinned, bundled into `vendor/libs.js`): three.js 0.186.1 (WebGL2) and three-mesh-bvh 0.9.16, which handles picking and the closest-point queries.
 
 ## Tests
 
