@@ -1,0 +1,15 @@
+STEP Viewer itself is MIT-licensed (see LICENSE). It bundles the following third-party software (in vendor/):
+
+three.js 0.186.1 — MIT License, Copyright 2010-2025 three.js authors
+  https://github.com/mrdoob/three.js
+three-mesh-bvh 0.9.16 — MIT License, Copyright (c) 2019 Garrett Johnson
+  https://github.com/gkjohnson/three-mesh-bvh
+occt-import-js 0.0.23 — LGPL-2.1, Copyright (c) Viktor Kovacs
+  (built on Open CASCADE Technology, LGPL-2.1 with Open CASCADE exception)
+  Source: https://github.com/kovacsv/occt-import-js
+  vendor/occt.js contains the unmodified occt-import-js.js and occt-import-js.wasm
+  (base64-encoded); you may replace them with your own build.
+Sample model as1-oc-214.stp — from the occt-import-js test files (CAx-IF test suite).
+
+MIT License text: https://opensource.org/license/mit
+LGPL-2.1 text:    https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html

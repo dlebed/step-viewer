@@ -1,0 +1,5 @@
+tests/node_modules/
+tests/out/
+.cc-writes/
+.claude/settings.local.json
+.DS_Store

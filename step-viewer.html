@@ -1,0 +1,2390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STEP Viewer</title>
+<meta name="description" content="Single-page STEP/IGES/BREP viewer with snapping distance, minimum-distance and radius measurements. Runs fully in the browser on OpenCascade (WASM) + three.js.">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #eceef1;
+    --panel: #ffffff;
+    --panel-2: #f5f6f8;
+    --border: #d8dce2;
+    --text: #1c222a;
+    --muted: #677180;
+    --accent: #0a7cff;
+    --accent-weak: rgba(10, 124, 255, 0.12);
+    --measure: #e0560b;
+    --danger: #d12f2f;
+    --vp-top: #f8f9fb;
+    --vp-bottom: #d5dbe3;
+    --edge: #1b2026;
+    --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.08);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171b;
+      --panel: #1c2026;
+      --panel-2: #22272e;
+      --border: #2e343c;
+      --text: #e3e7ed;
+      --muted: #8b95a2;
+      --accent: #4ea1ff;
+      --accent-weak: rgba(78, 161, 255, 0.16);
+      --measure: #ff8c42;
+      --danger: #ff6b6b;
+      --vp-top: #2b3139;
+      --vp-bottom: #121519;
+      --edge: #07090b;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171b; --panel: #1c2026; --panel-2: #22272e; --border: #2e343c; --text: #e3e7ed;
+    --muted: #8b95a2; --accent: #4ea1ff; --accent-weak: rgba(78,161,255,.16); --measure: #ff8c42;
+    --danger: #ff6b6b; --vp-top: #2b3139; --vp-bottom: #121519; --edge: #07090b;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+  }
+  button, select, input { font: inherit; color: inherit; }
+
+  /* ---------- toolbar ---------- */
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+    padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .brand { font-weight: 650; letter-spacing: .2px; margin-right: 4px; white-space: nowrap; }
+  .group { display: flex; align-items: center; gap: 4px; }
+  .sep { width: 1px; height: 22px; background: var(--border); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn[aria-pressed="true"] { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
+  .btn kbd { font: 11px var(--mono); opacity: .6; }
+  .btn svg { width: 15px; height: 15px; flex: none; }
+  .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .segmented .btn { border: 0; border-radius: 0; border-right: 1px solid var(--border); }
+  .segmented .btn:last-child { border-right: 0; }
+  select {
+    height: 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); padding: 0 6px;
+  }
+  label.inline { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+  #file-name { color: var(--muted); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---------- main layout ---------- */
+  main { display: grid; grid-template-columns: 240px 1fr 300px; min-height: 0; }
+  aside {
+    background: var(--panel); min-height: 0; overflow: auto; display: flex; flex-direction: column;
+  }
+  aside.left { border-right: 1px solid var(--border); }
+  aside.right { border-left: 1px solid var(--border); }
+  aside h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted);
+    margin: 0; padding: 10px 12px 6px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .section { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .empty-note { color: var(--muted); padding: 2px 12px 8px; }
+  .linkbtn { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: 11px; text-transform: none; letter-spacing: 0; }
+
+  /* tree */
+  .tree { list-style: none; margin: 0; padding: 0 6px 0 4px; }
+  .tree ul { list-style: none; margin: 0; padding-left: 14px; }
+  .tree li > .row { display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px; }
+  .tree li > .row:hover { background: var(--panel-2); }
+  .tree .twisty { width: 14px; text-align: center; color: var(--muted); cursor: pointer; user-select: none; flex: none; }
+  .tree .name { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .tree .swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; border: 1px solid rgba(0,0,0,.2); }
+  .tree li.collapsed > ul { display: none; }
+
+  /* info + measurement list */
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; padding: 0 12px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-family: var(--mono); font-size: 12px; text-align: right; overflow-wrap: anywhere; }
+  .kv .title { grid-column: 1 / -1; font-weight: 600; margin-bottom: 2px; }
+  .mlist { list-style: none; margin: 0; padding: 0 8px; display: flex; flex-direction: column; gap: 4px; }
+  .mlist li {
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; cursor: pointer; background: var(--panel-2);
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 6px;
+  }
+  .mlist li.selected { border-color: var(--measure); box-shadow: 0 0 0 1px var(--measure) inset; }
+  .mlist .mtitle { font-weight: 600; }
+  .mlist .mvalue { font-family: var(--mono); font-size: 13px; text-align: right; }
+  .mlist .mdetail { grid-column: 1 / -1; color: var(--muted); font-family: var(--mono); font-size: 11px; white-space: pre-wrap; }
+  .mlist .del { grid-column: 2; grid-row: 1; }
+  .iconbtn { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 15px; line-height: 1; }
+  .iconbtn:hover { color: var(--danger); }
+
+  /* ---------- viewport ---------- */
+  #viewport {
+    position: relative; min-width: 0; min-height: 0; overflow: hidden;
+    background: linear-gradient(var(--vp-top), var(--vp-bottom));
+    touch-action: none;
+  }
+  #viewport canvas { display: block; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  .mlabel {
+    pointer-events: auto; cursor: pointer;
+    font: 600 12px var(--mono); color: #fff; background: var(--measure);
+    padding: 2px 6px; border-radius: 4px; white-space: nowrap; box-shadow: var(--shadow);
+    user-select: none;
+  }
+  .mlabel.selected { outline: 2px solid var(--text); }
+  .mlabel.preview { opacity: .85; pointer-events: none; }
+  .snap {
+    position: absolute; left: 0; top: 0; pointer-events: none; display: none;
+    width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid var(--accent);
+  }
+  .snap::after {
+    content: attr(data-label); position: absolute; left: 16px; top: -18px; white-space: nowrap;
+    font: 11px var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--border);
+    border-radius: 3px; padding: 0 4px;
+  }
+  .snap[data-kind="vertex"] { background: var(--accent-weak); }
+  .snap[data-kind="center"] { border-radius: 50%; }
+  .snap[data-kind="center"]::before {
+    content: ""; position: absolute; inset: 4px; background: var(--accent); border-radius: 50%;
+  }
+  .snap[data-kind="mid"] { transform: rotate(45deg) scale(.8); }
+  .snap[data-kind="mid"]::after { transform: rotate(-45deg) scale(1.25); left: 12px; top: -14px; }
+  .snap[data-kind="edge"] { width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; }
+  .snap[data-kind="face"] { width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; border-width: 2px; }
+  .snap[data-kind="face"]::after, .snap[data-kind="edge"]::after { display: none; }
+
+  #empty {
+    position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+  }
+  #empty .card {
+    pointer-events: auto; text-align: center; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px 28px; box-shadow: var(--shadow); max-width: 380px;
+  }
+  #empty h1 { font-size: 17px; margin: 0 0 6px; }
+  #empty p { margin: 0 0 14px; color: var(--muted); }
+  #empty .actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  #drop {
+    position: absolute; inset: 8px; border: 2px dashed var(--accent); border-radius: 12px; display: none;
+    place-items: center; background: var(--accent-weak); font-size: 16px; font-weight: 600; color: var(--accent);
+    pointer-events: none;
+  }
+  body.dragging #drop { display: grid; }
+  #busy {
+    position: absolute; left: 50%; top: 14px; transform: translateX(-50%); display: none; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; box-shadow: var(--shadow);
+  }
+  #busy.on { display: flex; }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #toast {
+    position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: min(560px, 90%);
+    background: var(--danger); color: #fff; padding: 8px 14px; border-radius: 8px; display: none; box-shadow: var(--shadow);
+  }
+  #toast.info { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+
+  /* ---------- status bar ---------- */
+  footer {
+    display: flex; gap: 16px; align-items: center; padding: 4px 10px; font-size: 12px; color: var(--muted);
+    background: var(--panel); border-top: 1px solid var(--border); white-space: nowrap; overflow: hidden;
+  }
+  footer #hint { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  footer .spacer { flex: 1; }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    aside.left { display: none; }
+    aside.right { border-left: 0; border-top: 1px solid var(--border); max-height: 38vh; }
+    .btn kbd { display: none; }
+  }
+</style>
+<!-- Libraries are classic scripts (not ES modules) so the page also works when opened from disk. Rebuild with build-vendor.mjs. -->
+<script src="vendor/libs.js"></script>
+</head>
+<body>
+<header class="toolbar">
+  <span class="brand">STEP Viewer</span>
+  <div class="group">
+    <button class="btn primary" id="btn-open" title="Open a STEP / IGES / BREP file">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/></svg>Open
+    </button>
+    <input type="file" id="file-input" accept=".step,.stp,.iges,.igs,.brep,.brp" hidden>
+    <span id="file-name"></span>
+  </div>
+  <span class="sep"></span>
+  <div class="segmented" role="group" aria-label="Tool">
+    <button class="btn" data-mode="inspect" title="Inspect faces and edges (I)">Inspect <kbd>I</kbd></button>
+    <button class="btn" data-mode="distance" title="Point-to-point distance with snapping (D)">Distance <kbd>D</kbd></button>
+    <button class="btn" data-mode="min" title="Minimum distance between faces, edges and vertices (M)">Min&nbsp;distance <kbd>M</kbd></button>
+    <button class="btn" data-mode="radius" title="Radius / diameter of circular edges, cylinders, spheres, cones (R)">Radius <kbd>R</kbd></button>
+  </div>
+  <span class="sep"></span>
+  <div class="group">
+    <button class="btn" id="btn-fit" title="Fit model in view (F)">Fit <kbd>F</kbd></button>
+    <select id="sel-view" title="Standard views (1–7)" aria-label="Standard view">
+      <option value="">View…</option>
+      <option value="iso">Iso (1)</option>
+      <option value="front">Front (2)</option>
+      <option value="back">Back (3)</option>
+      <option value="left">Left (4)</option>
+      <option value="right">Right (5)</option>
+      <option value="top">Top (6)</option>
+      <option value="bottom">Bottom (7)</option>
+    </select>
+    <button class="btn" id="btn-ortho" aria-pressed="false" title="Orthographic projection (O)">Ortho <kbd>O</kbd></button>
+    <button class="btn" id="btn-edges" aria-pressed="true" title="Show edges (E)">Edges <kbd>E</kbd></button>
+    <button class="btn" id="btn-colors" aria-pressed="true" title="Use colors stored in the file">Colors</button>
+  </div>
+  <span class="sep"></span>
+  <div class="group">
+    <label class="inline">Quality
+      <select id="sel-quality" title="Tessellation quality; finer = more exact distances between curved faces">
+        <option value="coarse">Coarse</option>
+        <option value="normal" selected>Normal</option>
+        <option value="fine">Fine</option>
+      </select>
+    </label>
+    <label class="inline">Units
+      <select id="sel-units">
+        <option value="mm" selected>mm</option>
+        <option value="cm">cm</option>
+        <option value="m">m</option>
+        <option value="in">in</option>
+      </select>
+    </label>
+    <select id="sel-precision" title="Decimal places" aria-label="Decimal places">
+      <option value="1">0.0</option>
+      <option value="2">0.00</option>
+      <option value="3" selected>0.000</option>
+      <option value="4">0.0000</option>
+    </select>
+  </div>
+</header>
+
+<main>
+  <aside class="left">
+    <div class="section">
+      <h2>Model</h2>
+      <ul class="tree" id="tree"></ul>
+      <div class="empty-note" id="tree-empty">No model loaded.</div>
+    </div>
+  </aside>
+
+  <div id="viewport">
+    <div id="labels"></div>
+    <div class="snap" id="snap"></div>
+    <div id="empty">
+      <div class="card">
+        <h1>Open a STEP file</h1>
+        <p>Drop a <b>.step / .stp</b> file anywhere (IGES and BREP also work), or pick one. Files never leave your machine.</p>
+        <div class="actions">
+          <button class="btn primary" id="btn-open-2">Choose file…</button>
+          <button class="btn" id="btn-sample" title="Loads a CAx-IF test assembly from the occt-import-js repository">Load sample assembly</button>
+        </div>
+      </div>
+    </div>
+    <div id="drop">Drop to open</div>
+    <div id="busy"><span class="spinner"></span><span id="busy-text">Loading…</span></div>
+    <div id="toast" role="status"></div>
+  </div>
+
+  <aside class="right">
+    <div class="section">
+      <h2>Selection</h2>
+      <dl class="kv" id="info"></dl>
+      <div class="empty-note" id="info-empty">Hover or click geometry to inspect it.</div>
+    </div>
+    <div class="section" style="border-bottom:0">
+      <h2>Measurements <button class="linkbtn" id="btn-clear">Clear all</button></h2>
+      <ul class="mlist" id="mlist"></ul>
+      <div class="empty-note" id="mlist-empty">No measurements yet. Pick a tool: Distance, Min distance or Radius.</div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <span id="hint">Open a file to begin.</span>
+  <span class="spacer"></span>
+  <span id="coords"></span>
+  <span id="stats"></span>
+</footer>
+
+<!--
+  Geometry core. Plain script text (not executed directly) so it can be shared by:
+    * the main thread         -> new Function(src + 'return CORE')()
+    * the parser Web Worker   -> concatenated into the worker's blob source
+    * the Node unit tests     -> tests/geometry.test.mjs extracts this block
+  Everything here is dependency-free, except createMeasure(), which receives three.js + three-mesh-bvh.
+-->
+<script type="text/plain" id="core-src">
+'use strict';
+
+// ---------- small vector helpers on [x, y, z] arrays ----------
+function vSub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+function vAdd(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+function vScale(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+function vDot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function vCross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function vLen(a) { return Math.hypot(a[0], a[1], a[2]); }
+function vDist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
+function vNorm(a) { const l = vLen(a); return l > 0 ? [a[0] / l, a[1] / l, a[2] / l] : [0, 0, 0]; }
+function vLerp(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+function pointAt(arr, i) { return [arr[3 * i], arr[3 * i + 1], arr[3 * i + 2]]; }
+function centroid(pts) {
+  const c = [0, 0, 0];
+  for (const p of pts) { c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; }
+  return vScale(c, 1 / pts.length);
+}
+// Unit vectors u, v completing n to an orthonormal basis.
+function perpBasis(n) {
+  const a = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const u = vNorm(vCross(n, a));
+  return [u, vCross(n, u)];
+}
+
+// ---------- linear algebra ----------
+// Eigen-decomposition of a symmetric 3x3 matrix (Jacobi rotations). Eigenvalues ascending.
+function symEigen3(a00, a01, a02, a11, a12, a22) {
+  const A = [[a00, a01, a02], [a01, a11, a12], [a02, a12, a22]];
+  const V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const scale = Math.abs(a00) + Math.abs(a11) + Math.abs(a22) + Math.abs(a01) + Math.abs(a02) + Math.abs(a12);
+  for (let sweep = 0; sweep < 60; sweep++) {
+    const off = Math.abs(A[0][1]) + Math.abs(A[0][2]) + Math.abs(A[1][2]);
+    if (off <= 1e-18 * scale || off === 0) break;
+    for (let p = 0; p < 2; p++) {
+      for (let q = p + 1; q < 3; q++) {
+        if (A[p][q] === 0) continue;
+        const theta = (A[q][q] - A[p][p]) / (2 * A[p][q]);
+        const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1), s = t * c;
+        for (let k = 0; k < 3; k++) {
+          const akp = A[k][p], akq = A[k][q];
+          A[k][p] = c * akp - s * akq; A[k][q] = s * akp + c * akq;
+        }
+        for (let k = 0; k < 3; k++) {
+          const apk = A[p][k], aqk = A[q][k];
+          A[p][k] = c * apk - s * aqk; A[q][k] = s * apk + c * aqk;
+        }
+        for (let k = 0; k < 3; k++) {
+          const vkp = V[k][p], vkq = V[k][q];
+          V[k][p] = c * vkp - s * vkq; V[k][q] = s * vkp + c * vkq;
+        }
+      }
+    }
+  }
+  const order = [0, 1, 2].sort((i, j) => A[i][i] - A[j][j]);
+  return { values: order.map((i) => A[i][i]), vectors: order.map((i) => [V[0][i], V[1][i], V[2][i]]) };
+}
+
+// Gaussian elimination with partial pivoting. A: array of rows. Returns null when singular.
+function solveLinear(A, b) {
+  const n = b.length;
+  const M = A.map((row, i) => [...row, b[i]]);
+  let maxAbs = 0;
+  for (const row of A) for (const v of row) maxAbs = Math.max(maxAbs, Math.abs(v));
+  if (maxAbs === 0) return null;
+  for (let c = 0; c < n; c++) {
+    let piv = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (Math.abs(M[piv][c]) <= 1e-14 * maxAbs) return null;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r = c + 1; r < n; r++) {
+      const f = M[r][c] / M[c][c];
+      for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+    }
+  }
+  const x = new Array(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) {
+    let s = M[r][n];
+    for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k];
+    x[r] = s / M[r][r];
+  }
+  return x.every(Number.isFinite) ? x : null;
+}
+
+// ---------- fitting ----------
+function fitPlane(pts) {
+  const mean = centroid(pts);
+  let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+  for (const p of pts) {
+    const x = p[0] - mean[0], y = p[1] - mean[1], z = p[2] - mean[2];
+    xx += x * x; xy += x * y; xz += x * z; yy += y * y; yz += y * z; zz += z * z;
+  }
+  const n = pts.length;
+  const eig = symEigen3(xx / n, xy / n, xz / n, yy / n, yz / n, zz / n);
+  const normal = eig.vectors[0];
+  let maxDev = 0;
+  for (const p of pts) maxDev = Math.max(maxDev, Math.abs(vDot(vSub(p, mean), normal)));
+  return { point: mean, normal, maxDev, eig };
+}
+
+// Circle through 2D points: algebraic (Kåsa) start, refined by Gauss–Newton on the geometric error.
+function fitCircle2D(pts) {
+  const n = pts.length;
+  if (n < 3) return null;
+  let mx = 0, my = 0;
+  for (const p of pts) { mx += p[0]; my += p[1]; }
+  mx /= n; my /= n;
+  let sxx = 0, sxy = 0, syy = 0, sx = 0, sy = 0, sz = 0, sxz = 0, syz = 0;
+  for (const p of pts) {
+    const x = p[0] - mx, y = p[1] - my, z = x * x + y * y;
+    sxx += x * x; sxy += x * y; syy += y * y; sx += x; sy += y; sz += z; sxz += x * z; syz += y * z;
+  }
+  const sol = solveLinear([[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]], [-sxz, -syz, -sz]);
+  if (!sol) return null;
+  let cx = -sol[0] / 2, cy = -sol[1] / 2;
+  let r = Math.sqrt(cx * cx + cy * cy - sol[2]);
+  if (!Number.isFinite(r) || r <= 0) return null;
+  for (let it = 0; it < 12; it++) {
+    const JtJ = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], Jtr = [0, 0, 0];
+    for (const p of pts) {
+      const dx = p[0] - mx - cx, dy = p[1] - my - cy;
+      const d = Math.hypot(dx, dy) || 1e-300;
+      const res = d - r, J = [-dx / d, -dy / d, -1];
+      for (let i = 0; i < 3; i++) {
+        Jtr[i] += J[i] * res;
+        for (let j = 0; j < 3; j++) JtJ[i][j] += J[i] * J[j];
+      }
+    }
+    const step = solveLinear(JtJ, [-Jtr[0], -Jtr[1], -Jtr[2]]);
+    if (!step) break;
+    cx += step[0]; cy += step[1]; r += step[2];
+    if (Math.abs(step[0]) + Math.abs(step[1]) + Math.abs(step[2]) < 1e-13 * (r + 1)) break;
+  }
+  let maxRes = 0;
+  for (const p of pts) maxRes = Math.max(maxRes, Math.abs(Math.hypot(p[0] - mx - cx, p[1] - my - cy) - r));
+  return { cx: cx + mx, cy: cy + my, r: Math.abs(r), maxRes };
+}
+
+// Circle through 3D points: best plane, then a 2D circle fit inside it.
+function fitCircle3D(pts) {
+  const plane = fitPlane(pts);
+  const [u, v] = perpBasis(plane.normal);
+  const o = plane.point;
+  const c = fitCircle2D(pts.map((p) => { const d = vSub(p, o); return [vDot(d, u), vDot(d, v)]; }));
+  if (!c) return null;
+  const center = vAdd(o, vAdd(vScale(u, c.cx), vScale(v, c.cy)));
+  return { center, axis: plane.normal, radius: c.r, maxRes: c.maxRes, planeDev: plane.maxDev };
+}
+
+// Sphere: linear least squares on x²+y²+z² + Dx + Ey + Fz + G = 0 (centred coordinates).
+function fitSphere(pts) {
+  if (pts.length < 4) return null;
+  const m = centroid(pts);
+  const N = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], rhs = [0, 0, 0, 0];
+  for (const p of pts) {
+    const x = p[0] - m[0], y = p[1] - m[1], z = p[2] - m[2];
+    const row = [x, y, z, 1], w = -(x * x + y * y + z * z);
+    for (let i = 0; i < 4; i++) {
+      rhs[i] += row[i] * w;
+      for (let j = 0; j < 4; j++) N[i][j] += row[i] * row[j];
+    }
+  }
+  const s = solveLinear(N, rhs);
+  if (!s) return null;
+  const c = [-s[0] / 2, -s[1] / 2, -s[2] / 2];
+  const r = Math.sqrt(vDot(c, c) - s[3]);
+  if (!Number.isFinite(r)) return null;
+  const center = vAdd(c, m);
+  let maxRes = 0;
+  for (const p of pts) maxRes = Math.max(maxRes, Math.abs(vDist(p, center) - r));
+  return { center, radius: r, maxRes };
+}
+
+// Levenberg–Marquardt with a forward-difference Jacobian. residuals(x) -> array.
+function levenbergMarquardt(x0, residuals, iters = 40) {
+  let x = x0.slice(), r = residuals(x);
+  const sumsq = (a) => a.reduce((s, v) => s + v * v, 0);
+  let cost = sumsq(r), lambda = 1e-3;
+  const n = x.length;
+  for (let it = 0; it < iters; it++) {
+    const J = r.map(() => new Array(n));
+    for (let j = 0; j < n; j++) {
+      const h = 1e-7 * Math.max(1, Math.abs(x[j]));
+      const xp = x.slice(); xp[j] += h;
+      const rp = residuals(xp);
+      for (let i = 0; i < r.length; i++) J[i][j] = (rp[i] - r[i]) / h;
+    }
+    const JtJ = Array.from({ length: n }, () => new Array(n).fill(0)), Jtr = new Array(n).fill(0);
+    for (let i = 0; i < r.length; i++) {
+      for (let a = 0; a < n; a++) {
+        Jtr[a] += J[i][a] * r[i];
+        for (let b = a; b < n; b++) JtJ[a][b] += J[i][a] * J[i][b];
+      }
+    }
+    for (let a = 0; a < n; a++) for (let b = 0; b < a; b++) JtJ[a][b] = JtJ[b][a];
+    let improved = false;
+    for (let tries = 0; tries < 8 && !improved; tries++) {
+      const A = JtJ.map((row, a) => row.map((v, b) => (a === b ? v * (1 + lambda) + 1e-30 : v)));
+      const step = solveLinear(A, Jtr.map((v) => -v));
+      if (!step) { lambda *= 10; continue; }
+      const xn = x.map((v, j) => v + step[j]);
+      const rn = residuals(xn), cn = sumsq(rn);
+      if (cn < cost) {
+        const rel = (cost - cn) / (cost + 1e-300);
+        x = xn; r = rn; cost = cn; lambda = Math.max(lambda / 3, 1e-12); improved = true;
+        if (rel < 1e-12) it = iters;
+      } else lambda *= 4;
+    }
+    if (!improved) break;
+  }
+  return { x, r };
+}
+
+// Evenly subsample a point list (fits are O(points × params) per iteration).
+function subsample(list, max) {
+  if (list.length <= max) return list;
+  const out = [], step = list.length / max;
+  for (let i = 0; i < max; i++) out.push(list[Math.floor(i * step)]);
+  return out;
+}
+
+// Cylinder or cone. Surface normals from the mesh give the starting axis; the fit itself is done on the
+// points (OCCT normals can be off by ~0.1°, and are degenerate at a cone apex). Normals then serve as a
+// coarse consistency check, which separates e.g. a short cylinder from a sphere through the same two rims.
+function fitRevolution(pts, nrm, gtol) {
+  const n = nrm.length;
+  let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+  for (const q of nrm) { xx += q[0] * q[0]; xy += q[0] * q[1]; xz += q[0] * q[2]; yy += q[1] * q[1]; yz += q[1] * q[2]; zz += q[2] * q[2]; }
+  const eig = symEigen3(xx / n, xy / n, xz / n, yy / n, yz / n, zz / n);
+  const mean = centroid(pts);
+  const fitPts = subsample(pts, 1500);
+
+  // Axis line from direction a0 + (α, β) tilt and offset (s, t) in the plane through `mean`.
+  const axisFrom = (a0, u, v, p) => {
+    const axis = vNorm(vAdd(a0, vAdd(vScale(u, p[0]), vScale(v, p[1]))));
+    return { axis, origin: vAdd(mean, vAdd(vScale(u, p[2]), vScale(v, p[3]))) };
+  };
+  const axial = (p, origin, axis) => {
+    const d = vSub(p, origin), t = vDot(d, axis);
+    return [t, vLen(vSub(d, vScale(axis, t)))];
+  };
+
+  // ---- cylinder: normals (nearly) perpendicular to one direction
+  if (eig.values[0] < 2e-3 && eig.values[1] > 1e-6) {
+    const a0 = eig.vectors[0];
+    const [u, v] = perpBasis(a0);
+    const c = fitCircle2D(fitPts.map((p) => { const d = vSub(p, mean); return [vDot(d, u), vDot(d, v)]; }));
+    if (c) {
+      const { x } = levenbergMarquardt([0, 0, c.cx, c.cy, c.r], (p) => {
+        const { axis, origin } = axisFrom(a0, u, v, p);
+        return fitPts.map((q) => axial(q, origin, axis)[1] - p[4]);
+      });
+      const { axis, origin } = axisFrom(a0, u, v, x);
+      const r = Math.abs(x[4]);
+      let maxRes = 0, tMin = Infinity, tMax = -Infinity;
+      for (const p of pts) {
+        const [t, d] = axial(p, origin, axis);
+        maxRes = Math.max(maxRes, Math.abs(d - r)); tMin = Math.min(tMin, t); tMax = Math.max(tMax, t);
+      }
+      let normalDev = 0;
+      for (const q of nrm) normalDev += Math.abs(vDot(q, axis));
+      normalDev /= n;
+      if (maxRes <= Math.max(gtol, 1e-4 * r) && normalDev < 0.02) {
+        return {
+          type: 'cylinder', radius: r, axis, length: tMax - tMin,
+          center: vAdd(origin, vScale(axis, (tMin + tMax) / 2)),
+          axisStart: vAdd(origin, vScale(axis, tMin)), axisEnd: vAdd(origin, vScale(axis, tMax)),
+        };
+      }
+    }
+  }
+
+  // ---- cone: normals make a constant angle with the axis (normal vectors coplanar, off-origin)
+  const np = fitPlane(nrm);
+  const cosA = vDot(np.point, np.normal);
+  if (np.maxDev < 0.05 && Math.abs(cosA) > 1e-3 && Math.abs(cosA) < 0.999 && np.eig.values[1] > 1e-6) {
+    const a0 = np.normal;
+    const [u, v] = perpBasis(a0);
+    // Start: the axis meets every normal line, (p_i - x)·(a0 × n_i) = 0 with x = mean + s·u + t·v.
+    let a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const m = vCross(a0, nrm[i]);
+      const mu = vDot(m, u), mv = vDot(m, v), rr = vDot(vSub(pts[i], mean), m);
+      a11 += mu * mu; a12 += mu * mv; a22 += mv * mv; b1 += mu * rr; b2 += mv * rr;
+    }
+    const st = solveLinear([[a11, a12], [a12, a22]], [b1, b2]);
+    if (st) {
+      // radius(t) = k·t + b by linear regression for the start values
+      const origin0 = vAdd(mean, vAdd(vScale(u, st[0]), vScale(v, st[1])));
+      let s1 = 0, s2 = 0, s11 = 0, s12 = 0;
+      for (const p of fitPts) { const [t, d] = axial(p, origin0, a0); s1 += t; s2 += d; s11 += t * t; s12 += t * d; }
+      const m = fitPts.length, den = m * s11 - s1 * s1;
+      if (Math.abs(den) > 1e-300) {
+        const k0 = (m * s12 - s1 * s2) / den, b0 = (s2 - k0 * s1) / m;
+        const { x } = levenbergMarquardt([0, 0, st[0], st[1], k0, b0], (p) => {
+          const { axis, origin } = axisFrom(a0, u, v, p);
+          const cos = 1 / Math.sqrt(1 + p[4] * p[4]);
+          return fitPts.map((q) => { const [t, d] = axial(q, origin, axis); return (d - (p[4] * t + p[5])) * cos; });
+        });
+        const { axis, origin } = axisFrom(a0, u, v, x);
+        const k = x[4], b = x[5], cos = 1 / Math.sqrt(1 + k * k);
+        let maxRes = 0, rMin = Infinity, rMax = 0;
+        for (const p of pts) {
+          const [t, d] = axial(p, origin, axis);
+          maxRes = Math.max(maxRes, Math.abs(d - (k * t + b)) * cos);
+          rMin = Math.min(rMin, d); rMax = Math.max(rMax, d);
+        }
+        if (Math.abs(k) > 1e-4 && maxRes <= Math.max(gtol, 1e-4 * rMax)) {
+          return {
+            type: 'cone', axis: k > 0 ? axis : vScale(axis, -1), apex: vAdd(origin, vScale(axis, -b / k)),
+            halfAngle: Math.atan(Math.abs(k)), radiusMin: rMin, radiusMax: rMax,
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// ---------- topology reconstruction ----------
+// occt-import-js gives triangles + per-face triangle ranges only. B-rep edges are recovered as
+// the boundaries of each face's triangulation (OCCT shares edge discretisation nodes between faces).
+function chainSegments(segs) {
+  const n = segs.length / 2;
+  const adj = new Map();
+  for (let s = 0; s < n; s++) {
+    for (const v of [segs[2 * s], segs[2 * s + 1]]) {
+      let list = adj.get(v);
+      if (!list) { list = []; adj.set(v, list); }
+      list.push(s);
+    }
+  }
+  const used = new Uint8Array(n);
+  const chains = [];
+  const walk = (v, s) => {
+    const ids = [v];
+    for (;;) {
+      used[s] = 1;
+      const w = segs[2 * s] === v ? segs[2 * s + 1] : segs[2 * s];
+      ids.push(w);
+      const list = adj.get(w);
+      if (list.length !== 2) return { ids, closed: false };
+      const next = list[0] === s ? list[1] : list[0];
+      if (used[next]) return { ids, closed: w === ids[0] };
+      v = w; s = next;
+    }
+  };
+  for (const [v, list] of adj) {
+    if (list.length === 2) continue;
+    for (const s of list) if (!used[s]) chains.push(walk(v, s));
+  }
+  for (let s = 0; s < n; s++) if (!used[s]) chains.push(walk(segs[2 * s], s));
+  return chains;
+}
+
+function buildTopology(positions, index, faceRanges) {
+  const nV = positions.length / 3;
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  let maxAbs = 0;
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      const c = positions[i + k];
+      if (c < lo[k]) lo[k] = c;
+      if (c > hi[k]) hi[k] = c;
+      maxAbs = Math.max(maxAbs, Math.abs(c));
+    }
+  }
+  const diag = nV ? vDist(lo, hi) : 0;
+  // Geometric tolerance: well above float32 noise, far below any feature size.
+  const gtol = Math.max(diag * 1e-6, maxAbs * 2e-6, 1e-9);
+
+  // Weld coincident nodes (faces are triangulated separately and duplicate their boundary nodes).
+  const wid = new Int32Array(nV);
+  const repr = [];
+  const map = new Map();
+  for (let i = 0; i < nV; i++) {
+    const key = Math.round(positions[3 * i] / gtol) + ',' + Math.round(positions[3 * i + 1] / gtol) + ',' + Math.round(positions[3 * i + 2] / gtol);
+    let id = map.get(key);
+    if (id === undefined) { id = repr.length; repr.push(i); map.set(key, id); }
+    wid[i] = id;
+  }
+  const nW = repr.length;
+
+  // Boundary segments per face = triangle edges used an odd number of times within that face.
+  // Seams (e.g. on a cylinder) are used twice after welding and disappear.
+  const segFaces = new Map();
+  const local = new Map();
+  const nF = faceRanges.length / 2;
+  for (let f = 0; f < nF; f++) {
+    local.clear();
+    for (let t = faceRanges[2 * f]; t <= faceRanges[2 * f + 1]; t++) {
+      for (let e = 0; e < 3; e++) {
+        const a = wid[index[3 * t + e]], b = wid[index[3 * t + ((e + 1) % 3)]];
+        if (a === b) continue;
+        const k = a < b ? a * nW + b : b * nW + a;
+        local.set(k, (local.get(k) || 0) + 1);
+      }
+    }
+    for (const [k, count] of local) {
+      if (count % 2 === 0) continue;
+      const rec = segFaces.get(k);
+      if (!rec) segFaces.set(k, [f]);
+      else if (!rec.includes(f)) rec.push(f);
+    }
+  }
+
+  // Group segments by the set of faces they separate, then chain each group into polylines.
+  const groups = new Map();
+  for (const [k, faces] of segFaces) {
+    faces.sort((a, b) => a - b);
+    const gk = faces.join(',');
+    let g = groups.get(gk);
+    if (!g) { g = { fa: faces[0], fb: faces.length > 1 ? faces[1] : -1, segs: [] }; groups.set(gk, g); }
+    g.segs.push(Math.floor(k / nW), k % nW);
+  }
+
+  const edgeOffsets = [0], edgeClosed = [], edgeFaces = [], pointsOut = [];
+  const vertexIds = new Set();
+  for (const g of groups.values()) {
+    for (const chain of chainSegments(g.segs)) {
+      for (const w of chain.ids) {
+        const i = repr[w];
+        pointsOut.push(positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]);
+      }
+      edgeOffsets.push(pointsOut.length / 3);
+      edgeClosed.push(chain.closed ? 1 : 0);
+      edgeFaces.push(g.fa, g.fb);
+      if (!chain.closed) { vertexIds.add(chain.ids[0]); vertexIds.add(chain.ids[chain.ids.length - 1]); }
+    }
+  }
+  const vertices = new Float32Array(vertexIds.size * 3);
+  let vi = 0;
+  for (const w of vertexIds) {
+    const i = repr[w];
+    vertices[vi++] = positions[3 * i]; vertices[vi++] = positions[3 * i + 1]; vertices[vi++] = positions[3 * i + 2];
+  }
+  return {
+    gtol, diag,
+    edgePoints: new Float32Array(pointsOut),
+    edgeOffsets: new Uint32Array(edgeOffsets),
+    edgeClosed: new Uint8Array(edgeClosed),
+    edgeFaces: new Int32Array(edgeFaces),
+    vertices,
+  };
+}
+
+// ---------- occt-import-js result -> transferable model ----------
+function readCad(occt, bytes, ext, params) {
+  const fn = ext === 'brep' || ext === 'brp' ? 'ReadBrepFile' : ext === 'igs' || ext === 'iges' ? 'ReadIgesFile' : 'ReadStepFile';
+  const res = occt[fn](bytes, params);
+  if (!res || !res.success) throw new Error('OpenCascade could not read this file (is it a valid ' + (fn === 'ReadStepFile' ? 'STEP' : ext.toUpperCase()) + ' file?)');
+  return res;
+}
+
+function convertOcctResult(res) {
+  const meshes = res.meshes.map((m) => {
+    const positions = Float32Array.from(m.attributes.position.array);
+    const normals = m.attributes.normal ? Float32Array.from(m.attributes.normal.array) : null;
+    const index = Uint32Array.from(m.index.array);
+    const nTri = index.length / 3;
+    let faces = m.brep_faces && m.brep_faces.length ? m.brep_faces : [{ first: 0, last: nTri - 1, color: null }];
+    const faceRanges = new Int32Array(faces.length * 2);
+    const faceColors = new Float32Array(faces.length * 3).fill(-1);
+    faces.forEach((f, i) => {
+      faceRanges[2 * i] = f.first; faceRanges[2 * i + 1] = f.last;
+      if (f.color && f.color.some((c) => c > 0)) faceColors.set(f.color, 3 * i);
+    });
+    const topo = buildTopology(positions, index, faceRanges);
+    // Pure black is what several exporters write when no color was assigned; treat it as unset.
+    const color = m.color && m.color.some((c) => c > 0) ? m.color : null;
+    return { name: m.name || '', color, positions, normals, index, faceRanges, faceColors, topo };
+  });
+  return { root: res.root, meshes };
+}
+
+function modelTransferables(model) {
+  const list = [];
+  for (const m of model.meshes) {
+    list.push(m.positions.buffer, m.index.buffer, m.faceRanges.buffer, m.faceColors.buffer);
+    if (m.normals) list.push(m.normals.buffer);
+    const t = m.topo;
+    list.push(t.edgePoints.buffer, t.edgeOffsets.buffer, t.edgeClosed.buffer, t.edgeFaces.buffer, t.vertices.buffer);
+  }
+  return list;
+}
+
+// ---------- classification ----------
+function edgePointList(mesh, e) {
+  const t = mesh.topo, out = [];
+  for (let i = t.edgeOffsets[e]; i < t.edgeOffsets[e + 1]; i++) out.push(pointAt(t.edgePoints, i));
+  return out;
+}
+
+function polylineLength(pts) {
+  let L = 0;
+  for (let i = 1; i < pts.length; i++) L += vDist(pts[i - 1], pts[i]);
+  return L;
+}
+
+function polylinePointAtLength(pts, s) {
+  for (let i = 1; i < pts.length; i++) {
+    const d = vDist(pts[i - 1], pts[i]);
+    if (s <= d || i === pts.length - 1) return vLerp(pts[i - 1], pts[i], d > 0 ? Math.min(1, s / d) : 0);
+    s -= d;
+  }
+  return pts[0].slice();
+}
+
+function classifyEdgePoints(pts, closed, gtol) {
+  const length = polylineLength(pts);
+  const mid = polylinePointAtLength(pts, length / 2);
+  const a = pts[0], b = pts[pts.length - 1];
+  if (!closed) {
+    const ab = vSub(b, a), L = vLen(ab);
+    if (L > gtol) {
+      const dir = vScale(ab, 1 / L);
+      let maxDev = 0;
+      for (const p of pts) { const d = vSub(p, a); maxDev = Math.max(maxDev, vLen(vSub(d, vScale(dir, vDot(d, dir))))); }
+      if (maxDev <= gtol) return { type: 'line', length: L, start: a, end: b, dir, mid: vLerp(a, b, 0.5) };
+    }
+  }
+  const distinct = closed ? pts.length - 1 : pts.length;
+  if (distinct >= 3) {
+    const c = fitCircle3D(pts);
+    if (c) {
+      const tol = Math.max(gtol, 1e-4 * c.radius);
+      if (c.maxRes <= tol && c.planeDev <= tol) {
+        let sweep = 0;
+        for (let i = 1; i < pts.length; i++) {
+          const r0 = vSub(pts[i - 1], c.center), r1 = vSub(pts[i], c.center);
+          sweep += Math.atan2(vDot(vCross(r0, r1), c.axis), vDot(r0, r1));
+        }
+        const full = closed || Math.abs(sweep) > 2 * Math.PI - 1e-6;
+        return {
+          type: full ? 'circle' : 'arc', length, center: c.center, axis: c.axis, radius: c.radius,
+          sweep: full ? 2 * Math.PI : Math.abs(sweep), mid, start: a, end: b,
+        };
+      }
+    }
+  }
+  return { type: 'curve', length, mid, start: a, end: b };
+}
+
+function classifyEdge(mesh, e) {
+  return classifyEdgePoints(edgePointList(mesh, e), mesh.topo.edgeClosed[e] === 1, mesh.topo.gtol);
+}
+
+function classifyFace(mesh, f) {
+  const { positions, normals, index, faceRanges } = mesh;
+  const gtol = mesh.topo.gtol;
+  const seen = new Set(), pts = [], nrm = [];
+  let area = 0;
+  for (let t = faceRanges[2 * f]; t <= faceRanges[2 * f + 1]; t++) {
+    const ia = index[3 * t], ib = index[3 * t + 1], ic = index[3 * t + 2];
+    const A = pointAt(positions, ia), B = pointAt(positions, ib), C = pointAt(positions, ic);
+    const fn = vCross(vSub(B, A), vSub(C, A));
+    area += vLen(fn) / 2;
+    for (const i of [ia, ib, ic]) {
+      if (seen.has(i)) continue;
+      seen.add(i);
+      pts.push(pointAt(positions, i));
+      nrm.push(normals ? vNorm(pointAt(normals, i)) : vNorm(fn));
+    }
+  }
+  if (pts.length < 3) return { type: 'other', area };
+  const plane = fitPlane(pts);
+  if (plane.maxDev <= gtol) {
+    let normal = plane.normal;
+    if (vDot(normal, centroid(nrm)) < 0) normal = vScale(normal, -1);
+    return { type: 'plane', area, normal, point: plane.point };
+  }
+  const rev = fitRevolution(pts, nrm, gtol);
+  if (rev) return { ...rev, area };
+  const sph = fitSphere(subsample(pts, 4000));
+  if (sph) {
+    let maxRes = 0, normalDev = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const d = vSub(pts[i], sph.center);
+      maxRes = Math.max(maxRes, Math.abs(vLen(d) - sph.radius));
+      normalDev += vLen(vCross(nrm[i], vNorm(d)));
+    }
+    if (maxRes <= Math.max(gtol, 1e-4 * sph.radius) && normalDev / pts.length < 0.02) {
+      return { type: 'sphere', area, center: sph.center, radius: sph.radius };
+    }
+  }
+  return { type: 'other', area };
+}
+
+// ---------- closest-point primitives ----------
+function closestOnSegment(p, a, b) {
+  const ab = vSub(b, a), L2 = vDot(ab, ab);
+  const t = L2 > 0 ? Math.min(1, Math.max(0, vDot(vSub(p, a), ab) / L2)) : 0;
+  return vLerp(a, b, t);
+}
+
+// Closest points between segments p1q1 and p2q2 (Ericson, Real-Time Collision Detection 5.1.9).
+function closestSegSeg(p1, q1, p2, q2) {
+  const d1 = vSub(q1, p1), d2 = vSub(q2, p2), r = vSub(p1, p2);
+  const a = vDot(d1, d1), e = vDot(d2, d2), f = vDot(d2, r);
+  const EPS = 1e-30;
+  let s, t;
+  if (a <= EPS && e <= EPS) { s = 0; t = 0; }
+  else if (a <= EPS) { s = 0; t = Math.min(1, Math.max(0, f / e)); }
+  else {
+    const c = vDot(d1, r);
+    if (e <= EPS) { t = 0; s = Math.min(1, Math.max(0, -c / a)); }
+    else {
+      const b = vDot(d1, d2), denom = a * e - b * b;
+      s = denom > EPS ? Math.min(1, Math.max(0, (b * f - c * e) / denom)) : 0;
+      t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = Math.min(1, Math.max(0, -c / a)); }
+      else if (t > 1) { t = 1; s = Math.min(1, Math.max(0, (b - c) / a)); }
+    }
+  }
+  const ca = vAdd(p1, vScale(d1, s)), cb = vAdd(p2, vScale(d2, t));
+  return { distance: vDist(ca, cb), a: ca, b: cb };
+}
+
+function closestPolylinePoint(pts, p) {
+  let best = { distance: Infinity, a: null, b: p };
+  if (pts.length === 1) return { distance: vDist(pts[0], p), a: pts[0], b: p };
+  for (let i = 1; i < pts.length; i++) {
+    const c = closestOnSegment(p, pts[i - 1], pts[i]);
+    const d = vDist(c, p);
+    if (d < best.distance) best = { distance: d, a: c, b: p };
+  }
+  return best;
+}
+
+function closestPolylinePolyline(A, B) {
+  let best = { distance: Infinity, a: null, b: null };
+  for (let i = 1; i < A.length; i++) {
+    for (let j = 1; j < B.length; j++) {
+      const r = closestSegSeg(A[i - 1], A[i], B[j - 1], B[j]);
+      if (r.distance < best.distance) best = r;
+    }
+  }
+  return best;
+}
+
+// Angle between two entities that have a direction (line/axis) or a normal (plane/circle).
+function directionOf(info) {
+  if (!info) return null;
+  if (info.type === 'plane') return { kind: 'normal', v: info.normal };
+  if (info.type === 'line') return { kind: 'dir', v: info.dir };
+  if (info.type === 'cylinder' || info.type === 'cone') return { kind: 'dir', v: info.axis };
+  if (info.type === 'circle' || info.type === 'arc') return { kind: 'normal', v: info.axis };
+  return null;
+}
+function angleBetween(infoA, infoB) {
+  const a = directionOf(infoA), b = directionOf(infoB);
+  if (!a || !b) return null;
+  const c = Math.min(1, Math.abs(vDot(vNorm(a.v), vNorm(b.v))));
+  const ang = Math.acos(c) * 180 / Math.PI;
+  return a.kind === b.kind ? ang : 90 - ang;
+}
+
+// ---------- BVH-backed measurements (three.js + three-mesh-bvh injected) ----------
+function createMeasure(THREE, MeshBVH) {
+  const v1 = new THREE.Vector3(), v2 = new THREE.Vector3();
+  const identity = new THREE.Matrix4();
+
+  function positionAttribute(mesh) {
+    if (!mesh.positionAttr) mesh.positionAttr = new THREE.BufferAttribute(mesh.positions, 3);
+    return mesh.positionAttr;
+  }
+
+  // Per-face geometry sharing the mesh's position buffer, with its own BVH (cached).
+  function faceGeometry(mesh, f) {
+    if (!mesh.faceGeoms) mesh.faceGeoms = new Map();
+    let g = mesh.faceGeoms.get(f);
+    if (g) return g;
+    g = new THREE.BufferGeometry();
+    g.setAttribute('position', positionAttribute(mesh));
+    g.setIndex(new THREE.BufferAttribute(mesh.index.slice(3 * mesh.faceRanges[2 * f], 3 * (mesh.faceRanges[2 * f + 1] + 1)), 1));
+    g.boundsTree = new MeshBVH(g);
+    g.computeBoundingBox();
+    mesh.faceGeoms.set(f, g);
+    return g;
+  }
+
+  function boxDistance(b1, b2) {
+    let s = 0;
+    for (const k of ['x', 'y', 'z']) {
+      const gap = Math.max(0, b1.min[k] - b2.max[k], b2.min[k] - b1.max[k]);
+      s += gap * gap;
+    }
+    return Math.sqrt(s);
+  }
+
+  function pointFace(p, mesh, f) {
+    const hit = faceGeometry(mesh, f).boundsTree.closestPointToPoint(v1.set(p[0], p[1], p[2]));
+    return { distance: hit.distance, a: p, b: hit.point.toArray() };
+  }
+
+  function edgeFace(pts, mesh, f) {
+    const bvh = faceGeometry(mesh, f).boundsTree;
+    const seg = new THREE.Line3(), segBox = new THREE.Box3();
+    const onTri = new THREE.Vector3(), onSeg = new THREE.Vector3();
+    let best = { distance: Infinity, a: null, b: null };
+    for (let i = 1; i < pts.length; i++) {
+      seg.start.fromArray(pts[i - 1]); seg.end.fromArray(pts[i]);
+      segBox.makeEmpty().expandByPoint(seg.start).expandByPoint(seg.end);
+      bvh.shapecast({
+        intersectsBounds: (box) => boxDistance(box, segBox) < best.distance,
+        intersectsTriangle: (tri) => {
+          const d = tri.closestPointToSegment(seg, onTri, onSeg);
+          if (d < best.distance) best = { distance: d, a: onSeg.toArray(), b: onTri.toArray() };
+          return false;
+        },
+      });
+    }
+    return best;
+  }
+
+  function faceFace(meshA, fa, meshB, fb) {
+    const gA = faceGeometry(meshA, fa), gB = faceGeometry(meshB, fb);
+    const t1 = {}, t2 = {};
+    const hit = gA.boundsTree.closestPointToGeometry(gB, identity, t1, t2);
+    if (!hit) return null;
+    return { distance: t1.distance, a: t1.point.toArray(), b: t2.point.toArray() };
+  }
+
+  const rank = { point: 0, edge: 1, face: 2 };
+  // Entities: { kind: 'point', point } | { kind: 'edge', mesh, id } | { kind: 'face', mesh, id }
+  function minDistance(A, B) {
+    let swap = rank[A.kind] > rank[B.kind];
+    const [P, Q] = swap ? [B, A] : [A, B];
+    let r;
+    if (P.kind === 'point' && Q.kind === 'point') r = { distance: vDist(P.point, Q.point), a: P.point, b: Q.point };
+    else if (P.kind === 'point' && Q.kind === 'edge') { const c = closestPolylinePoint(edgePointList(Q.mesh, Q.id), P.point); r = { distance: c.distance, a: P.point, b: c.a }; }
+    else if (P.kind === 'point' && Q.kind === 'face') r = pointFace(P.point, Q.mesh, Q.id);
+    else if (P.kind === 'edge' && Q.kind === 'edge') r = closestPolylinePolyline(edgePointList(P.mesh, P.id), edgePointList(Q.mesh, Q.id));
+    else if (P.kind === 'edge' && Q.kind === 'face') r = edgeFace(edgePointList(P.mesh, P.id), Q.mesh, Q.id);
+    else r = faceFace(P.mesh, P.id, Q.mesh, Q.id);
+    if (!r) return null;
+    return swap ? { distance: r.distance, a: r.b, b: r.a } : r;
+  }
+
+  return { faceGeometry, minDistance, positionAttribute };
+}
+
+const CORE = {
+  vSub, vAdd, vScale, vDot, vCross, vLen, vDist, vNorm, vLerp, perpBasis,
+  symEigen3, solveLinear, levenbergMarquardt, fitPlane, fitCircle2D, fitCircle3D, fitSphere, fitRevolution,
+  chainSegments, buildTopology, readCad, convertOcctResult, modelTransferables,
+  edgePointList, classifyEdgePoints, classifyEdge, classifyFace,
+  closestOnSegment, closestSegSeg, closestPolylinePoint, closestPolylinePolyline,
+  directionOf, angleBetween, createMeasure,
+};
+</script>
+
+<script type="module">
+const {
+  THREE, OrbitControls, CSS2DRenderer, CSS2DObject, RoomEnvironment, Line2, LineMaterial, LineGeometry,
+  MeshBVH, acceleratedRaycast, computeBoundsTree, disposeBoundsTree,
+} = window.VENDOR;
+
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+
+const CORE_SRC = document.getElementById('core-src').textContent;
+const core = new Function(CORE_SRC + '\nreturn CORE;')();
+const measure = core.createMeasure(THREE, MeshBVH);
+
+const QUALITY = {
+  coarse: { linearDeflection: 0.004, angularDeflection: 0.8 },
+  normal: { linearDeflection: 0.001, angularDeflection: 0.4 },
+  fine: { linearDeflection: 0.0002, angularDeflection: 0.15 },
+};
+const UNITS = { mm: 1, cm: 10, m: 1000, in: 25.4 };
+const EDGE_PX = 8;     // edge pick radius
+const SNAP_PX = 12;    // point snap radius
+const DEFAULT_COLOR = [0.72, 0.75, 0.79];
+
+const $ = (id) => document.getElementById(id);
+const viewport = $('viewport');
+
+// ======================================================================
+// Parser: OpenCascade in a Web Worker (falls back to the main thread)
+// ======================================================================
+// vendor/occt.js holds the occt-import-js source and its WASM as base64. Both are passed to the worker
+// directly, because a page opened from file:// may not fetch() or importScripts() local files.
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve; s.onerror = () => reject(new Error('Failed to load ' + src + '. Keep the vendor/ folder next to this HTML file.'));
+    document.head.appendChild(s);
+  });
+}
+
+let occtAssets = null;
+function loadOcctAssets() {
+  return occtAssets = occtAssets || loadScript('vendor/occt.js').then(() => {
+    const wasm = Uint8Array.from(atob(window.OCCT_WASM_B64), (c) => c.charCodeAt(0));
+    delete window.OCCT_WASM_B64;
+    return { src: window.OCCT_SRC, wasm };
+  });
+}
+
+function workerMain() {
+  let occtPromise = null;
+  self.onmessage = async (e) => {
+    if (e.data.wasm) { occtPromise = occtimportjs({ wasmBinary: e.data.wasm }); return; }
+    const { id, bytes, ext, params } = e.data;
+    try {
+      const occt = await occtPromise;
+      self.postMessage({ id, progress: 'Tessellating…' });
+      const res = readCad(occt, bytes, ext, params);
+      self.postMessage({ id, progress: 'Reconstructing edges…' });
+      const model = convertOcctResult(res);
+      self.postMessage({ id, model }, modelTransferables(model));
+    } catch (err) {
+      self.postMessage({ id, error: String((err && err.message) || err) });
+    }
+  };
+}
+
+const parser = (() => {
+  let worker = null, seq = 0;
+  const pending = new Map();
+  let mainThreadOcct = null;
+
+  function ensureWorker(assets) {
+    if (worker) return worker;
+    const src = CORE_SRC + '\n' + assets.src + '\n(' + workerMain.toString() + ')();';
+    worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    worker.postMessage({ wasm: assets.wasm });
+    worker.onmessage = (e) => {
+      const p = pending.get(e.data.id);
+      if (!p) return;
+      if (e.data.progress) { p.onProgress?.(e.data.progress); return; }
+      pending.delete(e.data.id);
+      if (e.data.error) p.reject(new Error(e.data.error)); else p.resolve(e.data.model);
+    };
+    worker.onerror = (e) => {
+      e.preventDefault();
+      const err = new Error('Could not start the OpenCascade worker (' + (e.message || 'network error') + ').');
+      for (const p of pending.values()) p.reject(err);
+      pending.clear();
+      worker.terminate(); worker = null;
+    };
+    return worker;
+  }
+
+  async function parseOnMainThread(bytes, ext, params, onProgress) {
+    if (!mainThreadOcct) {
+      const assets = await loadOcctAssets();
+      mainThreadOcct = await (0, eval)(assets.src + '\n;occtimportjs')({ wasmBinary: assets.wasm });
+    }
+    onProgress?.('Tessellating…');
+    await new Promise((r) => setTimeout(r, 30));
+    return core.convertOcctResult(core.readCad(mainThreadOcct, bytes, ext, params));
+  }
+
+  return {
+    async parse(bytes, ext, params, onProgress) {
+      const assets = await loadOcctAssets();
+      let w;
+      try { w = ensureWorker(assets); } catch (err) {
+        console.warn('Worker unavailable, parsing on the main thread', err);
+        return parseOnMainThread(bytes, ext, params, onProgress);
+      }
+      const id = ++seq;
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject, onProgress });
+        const copy = bytes.slice();
+        w.postMessage({ id, bytes: copy, ext, params }, [copy.buffer]);
+      });
+    },
+  };
+})();
+
+// ======================================================================
+// Renderer, cameras, controls
+// ======================================================================
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.toneMapping = THREE.NeutralToneMapping;
+viewport.prepend(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer({ element: $('labels') });
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.65;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8090a0, 0.6));
+
+const perspCam = new THREE.PerspectiveCamera(40, 1, 0.1, 1000);
+const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
+for (const cam of [perspCam, orthoCam]) {
+  cam.up.set(0, 0, 1);
+  const head = new THREE.DirectionalLight(0xffffff, 1.6);
+  head.position.set(0.3, 0.6, 1);
+  cam.add(head);
+  scene.add(cam);
+}
+perspCam.position.set(100, -100, 100);
+let camera = perspCam;
+let orthoHalfH = 50;
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.zoomToCursor = true;
+controls.screenSpacePanning = true;
+controls.addEventListener('change', requestRender);
+
+const modelRoot = new THREE.Group();
+const overlay = new THREE.Group();   // highlights + measurements, drawn on top
+scene.add(modelRoot, overlay);
+
+let viewW = 1, viewH = 1;
+const lineMaterials = new Set();
+function makeLineMaterial(opts) {
+  const m = new LineMaterial({ depthTest: false, transparent: true, ...opts });
+  m.resolution.set(viewW, viewH);
+  lineMaterials.add(m);
+  return m;
+}
+
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+const palette = {};
+function readPalette() {
+  palette.accent = new THREE.Color(cssVar('--accent'));
+  palette.measure = new THREE.Color(cssVar('--measure'));
+  palette.edge = new THREE.Color(cssVar('--edge'));
+}
+readPalette();
+
+const mat = {
+  surface: new THREE.MeshStandardMaterial({
+    vertexColors: true, metalness: 0.15, roughness: 0.55, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+  }),
+  edges: new THREE.LineBasicMaterial({ color: palette.edge, transparent: true, opacity: 0.85 }),
+  faceHover: new THREE.MeshBasicMaterial({ color: palette.accent, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }),
+  facePicked: new THREE.MeshBasicMaterial({ color: palette.measure, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }),
+  edgeHover: makeLineMaterial({ color: palette.accent, linewidth: 3.5 }),
+  edgePicked: makeLineMaterial({ color: palette.measure, linewidth: 3.5 }),
+  measureLine: makeLineMaterial({ color: palette.measure, linewidth: 2 }),
+  measureAxis: makeLineMaterial({ color: palette.measure, linewidth: 1.5, dashed: true, dashSize: 1, gapSize: 0.6 }),
+  dots: new THREE.PointsMaterial({ color: palette.measure, size: 9, sizeAttenuation: false, depthTest: false, transparent: true, map: dotTexture(), alphaTest: 0.3 }),
+};
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  readPalette();
+  mat.edges.color.copy(palette.edge);
+  mat.faceHover.color.copy(palette.accent); mat.edgeHover.color.copy(palette.accent);
+  for (const m of [mat.facePicked, mat.edgePicked, mat.measureLine, mat.measureAxis, mat.dots]) m.color.copy(palette.measure);
+  requestRender();
+});
+
+function dotTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.beginPath(); g.arc(32, 32, 28, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// ---- axis triad (bottom-left) ----
+const triad = (() => {
+  const s = new THREE.Scene();
+  const cam = new THREE.OrthographicCamera(-1.45, 1.45, 1.45, -1.45, -10, 10);
+  const colors = [0xe5484d, 0x30a46c, 0x3e63dd];
+  const dirs = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+  dirs.forEach((d, i) => {
+    s.add(new THREE.ArrowHelper(d, new THREE.Vector3(), 1, colors[i], 0.28, 0.16));
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = '#' + colors[i].toString(16).padStart(6, '0');
+    g.font = 'bold 44px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('XYZ'[i], 32, 34);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+    sp.position.copy(d).multiplyScalar(1.32); sp.scale.setScalar(0.5);
+    s.add(sp);
+  });
+  return {
+    render() {
+      const size = 110;
+      cam.position.set(0, 0, 0);
+      cam.quaternion.copy(camera.quaternion);
+      cam.position.copy(new THREE.Vector3(0, 0, 3).applyQuaternion(camera.quaternion));
+      cam.updateMatrixWorld();
+      renderer.setScissorTest(true);
+      renderer.setViewport(6, 6, size, size);
+      renderer.setScissor(6, 6, size, size);
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.render(s, cam);
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, viewW, viewH);
+      renderer.autoClear = true;
+    },
+  };
+})();
+
+// ---- render on demand ----
+let renderQueued = false;
+function requestRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(render);
+}
+function render() {
+  renderQueued = false;
+  updateClipping();
+  renderer.render(scene, camera);
+  if (model) triad.render();
+  labelRenderer.render(scene, camera);
+  if (hoverSnap) placeSnapMarker(hoverSnap);
+}
+
+function updateClipping() {
+  const r = Math.max(modelRadius, 1e-3);
+  if (camera.isPerspectiveCamera) {
+    const d = camera.position.distanceTo(controls.target);
+    const centerDist = camera.position.distanceTo(modelCenter);
+    camera.near = Math.max(d * 0.005, r * 1e-5, (centerDist - 1.5 * r) * 0.9);
+    camera.near = Math.min(camera.near, d * 0.5);
+    camera.far = centerDist + 2 * r;
+  } else {
+    camera.near = -100 * r; camera.far = 100 * r;
+  }
+  camera.updateProjectionMatrix();
+}
+
+function resize() {
+  const rect = viewport.getBoundingClientRect();
+  viewW = Math.max(1, Math.floor(rect.width)); viewH = Math.max(1, Math.floor(rect.height));
+  renderer.setSize(viewW, viewH);
+  labelRenderer.setSize(viewW, viewH);
+  perspCam.aspect = viewW / viewH;
+  updateOrthoFrustum();
+  for (const m of lineMaterials) m.resolution.set(viewW, viewH);
+  requestRender();
+}
+function updateOrthoFrustum() {
+  const aspect = viewW / viewH;
+  orthoCam.left = -orthoHalfH * aspect; orthoCam.right = orthoHalfH * aspect;
+  orthoCam.top = orthoHalfH; orthoCam.bottom = -orthoHalfH;
+  orthoCam.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(viewport);
+
+// ======================================================================
+// Model state
+// ======================================================================
+let model = null;          // { root, meshes: [...] } with three.js objects attached
+let modelRadius = 50;
+const modelCenter = new THREE.Vector3();
+let pickables = [];
+let lastFile = null;       // { bytes, name } for re-tessellation
+let loadSeq = 0;
+const settings = { units: 'mm', precision: 3, quality: 'normal', edges: true, colors: true, ortho: false };
+
+function meshColorArray(m, useFileColors) {
+  const nV = m.positions.length / 3;
+  const colors = new Float32Array(nV * 3);
+  const c = new THREE.Color();
+  const base = useFileColors && m.color ? m.color : DEFAULT_COLOR;
+  c.setRGB(base[0], base[1], base[2], THREE.SRGBColorSpace);
+  for (let i = 0; i < nV; i++) colors.set([c.r, c.g, c.b], 3 * i);
+  if (useFileColors) {
+    for (let f = 0; f < m.faceRanges.length / 2; f++) {
+      if (m.faceColors[3 * f] < 0) continue;
+      c.setRGB(m.faceColors[3 * f], m.faceColors[3 * f + 1], m.faceColors[3 * f + 2], THREE.SRGBColorSpace);
+      for (let t = m.faceRanges[2 * f]; t <= m.faceRanges[2 * f + 1]; t++) {
+        for (let k = 0; k < 3; k++) colors.set([c.r, c.g, c.b], 3 * m.index[3 * t + k]);
+      }
+    }
+  }
+  return colors;
+}
+
+function buildMesh(m, mi) {
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', measure.positionAttribute(m));
+  if (m.normals) geom.setAttribute('normal', new THREE.BufferAttribute(m.normals, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(meshColorArray(m, settings.colors), 3));
+  geom.setIndex(new THREE.BufferAttribute(m.index, 1));
+  if (!m.normals) geom.computeVertexNormals();
+  geom.computeBoundingSphere();
+  geom.computeBoundsTree({ indirect: true }); // indirect: keeps triangle order => face ranges stay valid
+  const mesh = new THREE.Mesh(geom, mat.surface);
+  mesh.userData.mi = mi;
+
+  // Edge lines
+  const t = m.topo, nE = t.edgeClosed.length;
+  let nSeg = 0;
+  for (let e = 0; e < nE; e++) nSeg += t.edgeOffsets[e + 1] - t.edgeOffsets[e] - 1;
+  const lp = new Float32Array(nSeg * 6);
+  let o = 0;
+  for (let e = 0; e < nE; e++) {
+    for (let i = t.edgeOffsets[e] + 1; i < t.edgeOffsets[e + 1]; i++) {
+      lp.set(t.edgePoints.subarray(3 * (i - 1), 3 * i + 3), o); o += 6;
+    }
+  }
+  const lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.BufferAttribute(lp, 3));
+  const lines = new THREE.LineSegments(lg, mat.edges);
+  lines.visible = settings.edges;
+  lines.raycast = () => {};
+
+  // Lookup tables
+  const nTri = m.index.length / 3;
+  m.triFace = new Int32Array(nTri);
+  const nF = m.faceRanges.length / 2;
+  for (let f = 0; f < nF; f++) for (let tt = m.faceRanges[2 * f]; tt <= m.faceRanges[2 * f + 1]; tt++) m.triFace[tt] = f;
+  m.faceEdges = Array.from({ length: nF }, () => []);
+  for (let e = 0; e < nE; e++) {
+    const fa = t.edgeFaces[2 * e], fb = t.edgeFaces[2 * e + 1];
+    if (fa >= 0) m.faceEdges[fa].push(e);
+    if (fb >= 0 && fb !== fa) m.faceEdges[fb].push(e);
+  }
+  m.faceInfo = new Map();
+  m.edgeInfo = new Map();
+  m.mi = mi;
+  m.mesh = mesh;
+  m.lines = lines;
+  return m;
+}
+
+function faceInfo(m, f) {
+  let i = m.faceInfo.get(f);
+  if (!i) { i = core.classifyFace(m, f); m.faceInfo.set(f, i); }
+  return i;
+}
+function edgeInfo(m, e) {
+  let i = m.edgeInfo.get(e);
+  if (!i) { i = core.classifyEdge(m, e); m.edgeInfo.set(e, i); }
+  return i;
+}
+
+function disposeModel() {
+  if (!model) return;
+  for (const m of model.meshes) {
+    m.mesh.geometry.disposeBoundsTree?.();
+    m.mesh.geometry.dispose();
+    m.lines.geometry.dispose();
+    if (m.faceGeoms) for (const g of m.faceGeoms.values()) g.dispose();
+  }
+  modelRoot.clear();
+  model = null;
+}
+
+function setModel(data, name, ms) {
+  clearMeasurements();
+  state.seq = 0;
+  cancelPending();
+  setHover(null);
+  disposeModel();
+  model = data;
+  let tris = 0, faces = 0, edges = 0;
+  model.meshes.forEach((m, mi) => {
+    buildMesh(m, mi);
+    tris += m.index.length / 3; faces += m.faceRanges.length / 2; edges += m.topo.edgeClosed.length;
+  });
+  buildTree();
+  refreshPickables();
+  const box = new THREE.Box3().setFromObject(modelRoot);
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  modelRadius = sphere.radius || 1;
+  modelCenter.copy(sphere.center);
+  mat.measureAxis.dashSize = modelRadius * 0.03; mat.measureAxis.gapSize = modelRadius * 0.02;
+  $('empty').style.display = 'none';
+  $('file-name').textContent = name;
+  $('file-name').title = name;
+  document.title = name + ' · STEP Viewer';
+  $('stats').textContent = `${model.meshes.length} part${model.meshes.length === 1 ? '' : 's'} · ${faces} faces · ${edges} edges · ${tris.toLocaleString()} triangles · ${ms} ms`;
+  setView('iso', true);
+  setMode(state.mode);
+  requestRender();
+}
+
+// ---- assembly tree ----
+function buildTree() {
+  const ul = $('tree');
+  ul.textContent = '';
+  // Skip unnamed single-child wrappers at the top.
+  let root = model.root;
+  while (root && !root.name && root.meshes.length === 0 && root.children.length === 1) root = root.children[0];
+  const top = root && !root.name && root.meshes.length === 0 ? root.children : [root];
+  for (const node of top) addTreeNode(node, modelRoot, ul);
+  $('tree-empty').style.display = ul.children.length ? 'none' : '';
+}
+
+function addTreeNode(node, parentGroup, parentUl) {
+  const group = new THREE.Group();
+  group.name = node.name;
+  parentGroup.add(group);
+  const li = document.createElement('li');
+  const row = document.createElement('div');
+  row.className = 'row';
+  const hasChildren = node.children.length > 0 || node.meshes.length > 1;
+  const twisty = document.createElement('span');
+  twisty.className = 'twisty';
+  twisty.textContent = hasChildren ? '▾' : '';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox'; cb.checked = true; cb.title = 'Show / hide';
+  const name = document.createElement('span');
+  name.className = 'name';
+  const firstMesh = node.meshes.length ? model.meshes[node.meshes[0]] : null;
+  name.textContent = node.name || firstMesh?.name || 'Unnamed';
+  name.title = 'Click to zoom to this part';
+  row.append(twisty, cb);
+  if (firstMesh) {
+    const sw = document.createElement('span');
+    sw.className = 'swatch';
+    const c = firstMesh.color || DEFAULT_COLOR;
+    sw.style.background = `rgb(${c.map((v) => Math.round(v * 255)).join(',')})`;
+    row.append(sw);
+  }
+  row.append(name);
+  li.append(row);
+  parentUl.append(li);
+
+  const childUl = document.createElement('ul');
+  li.append(childUl);
+  for (const mi of node.meshes) {
+    const m = model.meshes[mi];
+    if (node.meshes.length > 1) {
+      // several bodies in one node: list them so each can be toggled
+      const sub = new THREE.Group();
+      sub.add(m.mesh, m.lines);
+      group.add(sub);
+      addLeaf(childUl, m.name || 'Body ' + (mi + 1), sub, m);
+    } else {
+      group.add(m.mesh, m.lines);
+    }
+  }
+  for (const child of node.children) addTreeNode(child, group, childUl);
+
+  twisty.addEventListener('click', () => li.classList.toggle('collapsed'));
+  cb.addEventListener('change', () => {
+    group.visible = cb.checked;
+    li.querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = cb.checked; });
+    group.traverse((o) => { if (o.isGroup) o.visible = cb.checked; });
+    refreshPickables(); requestRender();
+  });
+  name.addEventListener('click', () => fitObject(group));
+}
+
+function addLeaf(ul, label, group, m) {
+  const li = document.createElement('li');
+  li.innerHTML = '<div class="row"><span class="twisty"></span><input type="checkbox" checked title="Show / hide"><span class="swatch"></span><span class="name"></span></div>';
+  const c = m.color || DEFAULT_COLOR;
+  li.querySelector('.swatch').style.background = `rgb(${c.map((v) => Math.round(v * 255)).join(',')})`;
+  li.querySelector('.name').textContent = label;
+  li.querySelector('input').addEventListener('change', (e) => { group.visible = e.target.checked; refreshPickables(); requestRender(); });
+  li.querySelector('.name').addEventListener('click', () => fitObject(group));
+  ul.append(li);
+}
+
+function isShown(o) {
+  for (; o; o = o.parent) if (!o.visible) return false;
+  return true;
+}
+function refreshPickables() {
+  pickables = model ? model.meshes.map((m) => m.mesh).filter(isShown) : [];
+}
+
+// ======================================================================
+// Camera helpers
+// ======================================================================
+const VIEWS = {
+  iso: [1, -1, 0.8], front: [0, -1, 0], back: [0, 1, 0], left: [-1, 0, 0], right: [1, 0, 0],
+  top: [0, -1e-4, 1], bottom: [0, 1e-4, -1],
+};
+
+function fitToSphere(center, radius, dir) {
+  const r = Math.max(radius, 1e-6);
+  dir = dir ? dir.clone().normalize() : camera.position.clone().sub(controls.target).normalize();
+  controls.target.copy(center);
+  const dist = r / Math.sin(THREE.MathUtils.degToRad(perspCam.fov / 2)) * 1.08;
+  perspCam.position.copy(center).addScaledVector(dir, dist);
+  orthoCam.position.copy(center).addScaledVector(dir, dist);
+  orthoHalfH = r * 1.08;
+  orthoCam.zoom = 1;
+  updateOrthoFrustum();
+  for (const cam of [perspCam, orthoCam]) cam.lookAt(center);
+  controls.update();
+  requestRender();
+}
+
+function visibleBounds(obj) {
+  const box = new THREE.Box3();
+  obj.traverse((o) => { if (o.isMesh && isShown(o)) box.expandByObject(o); });
+  return box;
+}
+
+function fitObject(obj, dir) {
+  const box = visibleBounds(obj);
+  if (box.isEmpty()) return;
+  const s = box.getBoundingSphere(new THREE.Sphere());
+  fitToSphere(s.center, s.radius, dir);
+}
+
+function setView(name, fit) {
+  const d = new THREE.Vector3(...VIEWS[name]);
+  if (fit || !model) { fitObject(modelRoot, d); return; }
+  const box = visibleBounds(modelRoot);
+  if (box.isEmpty()) return;
+  const s = box.getBoundingSphere(new THREE.Sphere());
+  fitToSphere(s.center, s.radius, d);
+}
+
+function setOrtho(on) {
+  settings.ortho = on;
+  $('btn-ortho').setAttribute('aria-pressed', String(on));
+  const target = controls.target;
+  if (on && camera !== orthoCam) {
+    const d = perspCam.position.distanceTo(target);
+    orthoHalfH = d * Math.tan(THREE.MathUtils.degToRad(perspCam.fov / 2));
+    orthoCam.zoom = 1;
+    orthoCam.position.copy(perspCam.position);
+    orthoCam.quaternion.copy(perspCam.quaternion);
+    updateOrthoFrustum();
+    camera = orthoCam;
+  } else if (!on && camera !== perspCam) {
+    const h = orthoHalfH / orthoCam.zoom;
+    const d = h / Math.tan(THREE.MathUtils.degToRad(perspCam.fov / 2));
+    const dir = orthoCam.position.clone().sub(target).normalize();
+    perspCam.position.copy(target).addScaledVector(dir, d);
+    perspCam.quaternion.copy(orthoCam.quaternion);
+    camera = perspCam;
+  }
+  controls.object = camera;
+  controls.update();
+  requestRender();
+}
+
+// ======================================================================
+// Picking & snapping
+// ======================================================================
+const raycaster = new THREE.Raycaster();
+raycaster.firstHitOnly = true;
+const ndc = new THREE.Vector2();
+const tmpV = new THREE.Vector3();
+
+function toScreen(p) {
+  tmpV.set(p[0], p[1], p[2]).project(camera);
+  return [(tmpV.x + 1) / 2 * viewW, (1 - tmpV.y) / 2 * viewH, tmpV.z];
+}
+
+// Closest point of an edge to screen position (sx, sy), measured in pixels.
+function edgeScreenClosest(m, e, sx, sy) {
+  const t = m.topo;
+  let best = { d: Infinity, point: null };
+  let prev = null, prevP = null;
+  for (let i = t.edgeOffsets[e]; i < t.edgeOffsets[e + 1]; i++) {
+    const P = [t.edgePoints[3 * i], t.edgePoints[3 * i + 1], t.edgePoints[3 * i + 2]];
+    const S = toScreen(P);
+    if (prev) {
+      const dx = S[0] - prev[0], dy = S[1] - prev[1], L2 = dx * dx + dy * dy;
+      let u = L2 > 0 ? ((sx - prev[0]) * dx + (sy - prev[1]) * dy) / L2 : 0;
+      u = Math.min(1, Math.max(0, u));
+      const d = Math.hypot(prev[0] + u * dx - sx, prev[1] + u * dy - sy);
+      if (d < best.d) best = { d, point: core.vLerp(prevP, P, u) };
+    }
+    prev = S; prevP = P;
+  }
+  return best;
+}
+
+// Returns { kind, point, m, face, edge, label } or null.
+function pick(clientX, clientY) {
+  if (!model || !pickables.length) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const sx = clientX - rect.left, sy = clientY - rect.top;
+  ndc.set(sx / viewW * 2 - 1, -(sy / viewH) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObjects(pickables, false)[0];
+  if (!hit) return null;
+  const m = model.meshes[hit.object.userData.mi];
+  const face = m.triFace[hit.faceIndex];
+  const result = { kind: 'face', point: hit.point.toArray(), m, face, edge: -1, sx, sy };
+
+  // Nearest edge of the hovered face.
+  let bestEdge = null;
+  for (const e of m.faceEdges[face]) {
+    const r = edgeScreenClosest(m, e, sx, sy);
+    if (r.d < EDGE_PX && (!bestEdge || r.d < bestEdge.d)) bestEdge = { ...r, e };
+  }
+  if (bestEdge) Object.assign(result, { kind: 'edge', edge: bestEdge.e, point: bestEdge.point });
+
+  // Point snaps: vertices > circle centers > midpoints.
+  const cands = [];
+  for (const e of m.faceEdges[face]) {
+    const info = edgeInfo(m, e);
+    if (!m.topo.edgeClosed[e]) {
+      cands.push({ kind: 'vertex', point: info.start, pri: 0, e });
+      cands.push({ kind: 'vertex', point: info.end, pri: 0, e });
+    }
+    if (info.type === 'circle' || info.type === 'arc') cands.push({ kind: 'center', point: info.center, pri: 1, e });
+    if (info.type !== 'circle') cands.push({ kind: 'mid', point: info.mid, pri: 2, e });
+  }
+  let snap = null;
+  for (const c of cands) {
+    const s = toScreen(c.point);
+    const d = Math.hypot(s[0] - sx, s[1] - sy);
+    if (d > SNAP_PX) continue;
+    if (!snap || c.pri < snap.pri || (c.pri === snap.pri && d < snap.d)) snap = { ...c, d };
+  }
+  if (snap) Object.assign(result, { kind: snap.kind, point: snap.point, snapEdge: snap.e });
+  return result;
+}
+
+const SNAP_LABEL = { vertex: 'Vertex', center: 'Center', mid: 'Midpoint', edge: 'Edge', face: 'Face' };
+function placeSnapMarker(s) {
+  const el = $('snap');
+  if (!s) { el.style.display = 'none'; return; }
+  const p = toScreen(s.point);
+  el.style.display = 'block';
+  el.dataset.kind = s.kind;
+  el.dataset.label = SNAP_LABEL[s.kind];
+  el.style.left = p[0] + 'px';
+  el.style.top = p[1] + 'px';
+}
+
+// Entity to act on for a pick, depending on the tool.
+function entityFromPick(p, mode) {
+  if (!p) return null;
+  if (mode === 'radius') {
+    if (p.kind === 'edge' || p.kind === 'center' || p.kind === 'mid') {
+      const e = p.kind === 'edge' ? p.edge : p.snapEdge;
+      return { kind: 'edge', mesh: p.m, id: e, at: p.point };
+    }
+    return { kind: 'face', mesh: p.m, id: p.face, at: p.point };
+  }
+  if (p.kind === 'vertex' || p.kind === 'center' || p.kind === 'mid') return { kind: 'point', point: p.point, label: SNAP_LABEL[p.kind], mesh: p.m };
+  if (p.kind === 'edge') return { kind: 'edge', mesh: p.m, id: p.edge, at: p.point };
+  return { kind: 'face', mesh: p.m, id: p.face, at: p.point };
+}
+
+function entityInfo(ent) {
+  if (!ent) return null;
+  if (ent.kind === 'edge') return edgeInfo(ent.mesh, ent.id);
+  if (ent.kind === 'face') return faceInfo(ent.mesh, ent.id);
+  return { type: 'point', point: ent.point };
+}
+
+// ======================================================================
+// Highlights
+// ======================================================================
+function makeFaceHighlight(material) {
+  const h = new THREE.Mesh(new THREE.BufferGeometry(), material);
+  h.renderOrder = 2; h.visible = false; h.raycast = () => {};
+  overlay.add(h);
+  return h;
+}
+function makeEdgeHighlight(material) {
+  const l = new Line2(new LineGeometry(), material);
+  l.renderOrder = 3; l.visible = false; l.raycast = () => {};
+  overlay.add(l);
+  return l;
+}
+const hl = {
+  faceHover: makeFaceHighlight(mat.faceHover),
+  edgeHover: makeEdgeHighlight(mat.edgeHover),
+  facePicked: makeFaceHighlight(mat.facePicked),
+  edgePicked: makeEdgeHighlight(mat.edgePicked),
+};
+
+function showEntity(ent, faceObj, edgeObj) {
+  faceObj.visible = false; edgeObj.visible = false;
+  if (!ent) return;
+  if (ent.kind === 'face') {
+    faceObj.geometry = measure.faceGeometry(ent.mesh, ent.id);
+    faceObj.visible = true;
+  } else if (ent.kind === 'edge') {
+    const pts = core.edgePointList(ent.mesh, ent.id);
+    edgeObj.geometry.dispose();
+    edgeObj.geometry = new LineGeometry().setPositions(pts.flat());
+    edgeObj.computeLineDistances();
+    edgeObj.visible = true;
+  }
+}
+
+// ======================================================================
+// Formatting
+// ======================================================================
+function fmtLen(mm, withUnit = true) {
+  const v = mm / UNITS[settings.units];
+  return v.toFixed(settings.precision) + (withUnit ? ' ' + settings.units : '');
+}
+function fmtVec(v, length = true) {
+  return v.map((x) => (length ? (x / UNITS[settings.units]).toFixed(settings.precision) : x.toFixed(4))).join(', ');
+}
+function fmtDeg(d) { return d.toFixed(Math.max(1, settings.precision - 1)) + '°'; }
+function fmtArea(mm2) {
+  const f = UNITS[settings.units] ** 2;
+  return (mm2 / f).toFixed(settings.precision) + ' ' + settings.units + '²';
+}
+
+const TYPE_NAME = {
+  plane: 'Planar face', cylinder: 'Cylindrical face', cone: 'Conical face', sphere: 'Spherical face', other: 'Freeform face',
+  line: 'Line edge', circle: 'Circle edge', arc: 'Arc edge', curve: 'Curve edge', point: 'Point',
+};
+
+function infoRows(ent) {
+  const i = entityInfo(ent);
+  if (!i) return null;
+  const rows = [];
+  if (ent.kind === 'point') {
+    rows.push(['Snap', ent.label || 'Point'], ['X', fmtLen(ent.point[0])], ['Y', fmtLen(ent.point[1])], ['Z', fmtLen(ent.point[2])]);
+  } else {
+    switch (i.type) {
+      case 'plane': rows.push(['Area', fmtArea(i.area)], ['Normal', fmtVec(i.normal, false)]); break;
+      case 'cylinder': rows.push(['Radius', fmtLen(i.radius)], ['Diameter', fmtLen(2 * i.radius)], ['Axis', fmtVec(i.axis, false)], ['Axis center', fmtVec(i.center)], ['Height', fmtLen(i.length)], ['Area', fmtArea(i.area)]); break;
+      case 'cone': rows.push(['Half angle', fmtDeg(i.halfAngle * 180 / Math.PI)], ['Radius min', fmtLen(i.radiusMin)], ['Radius max', fmtLen(i.radiusMax)], ['Axis', fmtVec(i.axis, false)], ['Apex', fmtVec(i.apex)], ['Area', fmtArea(i.area)]); break;
+      case 'sphere': rows.push(['Radius', fmtLen(i.radius)], ['Diameter', fmtLen(2 * i.radius)], ['Center', fmtVec(i.center)], ['Area', fmtArea(i.area)]); break;
+      case 'other': rows.push(['Area', fmtArea(i.area)]); break;
+      case 'line': rows.push(['Length', fmtLen(i.length)], ['Direction', fmtVec(i.dir, false)], ['Start', fmtVec(i.start)], ['End', fmtVec(i.end)]); break;
+      case 'circle': rows.push(['Radius', fmtLen(i.radius)], ['Diameter', fmtLen(2 * i.radius)], ['Center', fmtVec(i.center)], ['Axis', fmtVec(i.axis, false)], ['Circumference', fmtLen(i.length)]); break;
+      case 'arc': rows.push(['Radius', fmtLen(i.radius)], ['Diameter', fmtLen(2 * i.radius)], ['Sweep', fmtDeg(i.sweep * 180 / Math.PI)], ['Arc length', fmtLen(i.length)], ['Center', fmtVec(i.center)]); break;
+      case 'curve': rows.push(['Length', fmtLen(i.length)]); break;
+    }
+  }
+  if (ent.mesh) rows.push(['Part', ent.mesh.name || '—']);
+  return { title: TYPE_NAME[i.type] || i.type, rows };
+}
+
+function showInfo(ent) {
+  const dl = $('info');
+  dl.textContent = '';
+  const data = infoRows(ent);
+  $('info-empty').style.display = data ? 'none' : '';
+  if (!data) return;
+  const t = document.createElement('div');
+  t.className = 'title'; t.textContent = data.title;
+  dl.append(t);
+  for (const [k, v] of data.rows) {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = v;
+    dl.append(dt, dd);
+  }
+}
+
+// ======================================================================
+// Measurements
+// ======================================================================
+const state = { mode: 'inspect', first: null, hover: null, selectedEntity: null, selectedMeasure: null, list: [], seq: 0 };
+let hoverSnap = null;
+let preview = null;
+
+function makeLine(points, material) {
+  const l = new Line2(new LineGeometry().setPositions(points.flat()), material);
+  l.computeLineDistances();
+  l.renderOrder = 5;
+  return l;
+}
+function makeDots(points) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(points.flat(), 3));
+  const p = new THREE.Points(g, mat.dots);
+  p.renderOrder = 6;
+  return p;
+}
+function makeLabel(at, text, cls = '') {
+  const el = document.createElement('div');
+  el.className = 'mlabel ' + cls;
+  el.textContent = text;
+  const obj = new CSS2DObject(el);
+  obj.position.set(at[0], at[1], at[2]);
+  obj.center.set(0.5, 1.25);
+  return obj;
+}
+
+function measureText(ms) {
+  switch (ms.type) {
+    case 'distance':
+    case 'min': return fmtLen(ms.distance);
+    case 'radius':
+      if (ms.info.type === 'cone') return `∠ ${fmtDeg(ms.info.halfAngle * 180 / Math.PI)} · R ${fmtLen(ms.radius, false)}`;
+      return `R ${fmtLen(ms.radius, false)} · Ø ${fmtLen(2 * ms.radius)}`;
+  }
+  return '';
+}
+function measureDetail(ms) {
+  const lines = [];
+  if (ms.type === 'distance' || ms.type === 'min') {
+    const d = core.vSub(ms.b, ms.a);
+    lines.push(`ΔX ${fmtLen(Math.abs(d[0]), false)}  ΔY ${fmtLen(Math.abs(d[1]), false)}  ΔZ ${fmtLen(Math.abs(d[2]), false)}`);
+    if (ms.angle != null) lines.push(`Angle ${fmtDeg(ms.angle)}`);
+    if (ms.perpendicular != null) lines.push(`Parallel planes, ⊥ distance ${fmtLen(ms.perpendicular)}`);
+    lines.push(`${ms.what[0]} ↔ ${ms.what[1]}`);
+  } else if (ms.type === 'radius') {
+    const i = ms.info;
+    if (i.center) lines.push(`Center ${fmtVec(i.center)}`);
+    if (i.axis) lines.push(`Axis ${fmtVec(i.axis, false)}`);
+    if (i.type === 'cone') lines.push(`R ${fmtLen(i.radiusMin, false)} … ${fmtLen(i.radiusMax)}`);
+    if (i.type === 'arc') lines.push(`Sweep ${fmtDeg(i.sweep * 180 / Math.PI)}`);
+    lines.push(TYPE_NAME[i.type]);
+  }
+  return lines.join('\n');
+}
+const MEASURE_TITLE = { distance: 'Distance', min: 'Min distance', radius: 'Radius' };
+
+function entityName(ent) {
+  if (ent.kind === 'point') return ent.label || 'Point';
+  return TYPE_NAME[entityInfo(ent).type] || ent.kind;
+}
+
+function addMeasurement(ms) {
+  ms.id = ++state.seq;
+  ms.group = new THREE.Group();
+  if (ms.type === 'radius') {
+    ms.group.add(makeLine([ms.a, ms.b], mat.measureLine), makeDots([ms.a, ms.b]));
+    if (ms.axisLine) ms.group.add(makeLine(ms.axisLine, mat.measureAxis));
+  } else {
+    ms.group.add(makeLine([ms.a, ms.b], mat.measureLine), makeDots([ms.a, ms.b]));
+  }
+  ms.label = makeLabel(core.vLerp(ms.a, ms.b, 0.5), measureText(ms));
+  ms.label.element.addEventListener('pointerdown', (e) => { e.stopPropagation(); selectMeasurement(ms.id); });
+  ms.group.add(ms.label);
+  overlay.add(ms.group);
+  state.list.push(ms);
+  renderMeasureList();
+  selectMeasurement(ms.id);
+  requestRender();
+  return ms;
+}
+
+function removeMeasurement(id) {
+  const i = state.list.findIndex((m) => m.id === id);
+  if (i < 0) return;
+  const ms = state.list[i];
+  ms.label.removeFromParent();   // CSS2DObject removes its DOM element on 'removed'
+  ms.group.removeFromParent();
+  ms.group.traverse((o) => o.geometry?.dispose());
+  state.list.splice(i, 1);
+  if (state.selectedMeasure === id) state.selectedMeasure = null;
+  renderMeasureList();
+  requestRender();
+}
+
+function clearMeasurements() {
+  for (const ms of [...state.list]) removeMeasurement(ms.id);
+}
+
+function selectMeasurement(id) {
+  state.selectedMeasure = id;
+  for (const ms of state.list) ms.label.element.classList.toggle('selected', ms.id === id);
+  renderMeasureList();
+}
+
+function renderMeasureList() {
+  const ul = $('mlist');
+  ul.textContent = '';
+  for (const ms of state.list) {
+    const li = document.createElement('li');
+    if (ms.id === state.selectedMeasure) li.className = 'selected';
+    li.innerHTML = '<span class="mtitle"></span><span class="mvalue"></span><button class="iconbtn del" title="Delete (Del)">×</button><span class="mdetail"></span>';
+    li.querySelector('.mtitle').textContent = `#${ms.id} ${MEASURE_TITLE[ms.type]}`;
+    li.querySelector('.mvalue').textContent = measureText(ms);
+    li.querySelector('.mdetail').textContent = measureDetail(ms);
+    li.querySelector('.del').addEventListener('click', (e) => { e.stopPropagation(); removeMeasurement(ms.id); });
+    li.addEventListener('click', () => selectMeasurement(ms.id));
+    ul.append(li);
+  }
+  $('mlist-empty').style.display = state.list.length ? 'none' : '';
+}
+
+function refreshMeasureTexts() {
+  for (const ms of state.list) ms.label.element.textContent = measureText(ms);
+  renderMeasureList();
+  if (state.selectedEntity) showInfo(state.selectedEntity);
+  requestRender();
+}
+
+// ---- computing measurements ----
+function computeMinDistance(A, B) {
+  const r = measure.minDistance(A, B);
+  if (!r) return null;
+  const ms = { type: 'min', distance: r.distance, a: r.a, b: r.b, what: [entityName(A), entityName(B)] };
+  const iA = entityInfo(A), iB = entityInfo(B);
+  const ang = core.angleBetween(iA, iB);
+  if (ang != null) ms.angle = ang;
+  if (iA.type === 'plane' && iB.type === 'plane' && ang != null && ang < 0.01) {
+    ms.perpendicular = Math.abs(core.vDot(core.vSub(iB.point, iA.point), iA.normal));
+  }
+  return ms;
+}
+
+function computeRadius(ent) {
+  const info = entityInfo(ent);
+  const at = ent.at || null;
+  if (info.type === 'circle' || info.type === 'arc') {
+    // Radius line from center to the picked point projected onto the circle.
+    let dir = at ? core.vSub(at, info.center) : core.vSub(info.mid, info.center);
+    dir = core.vSub(dir, core.vScale(info.axis, core.vDot(dir, info.axis)));
+    const b = core.vAdd(info.center, core.vScale(core.vNorm(dir), info.radius));
+    return { type: 'radius', radius: info.radius, info, a: info.center, b };
+  }
+  if (info.type === 'cylinder' || info.type === 'cone') {
+    const p = at || info.center || info.apex;
+    const o = info.type === 'cylinder' ? info.center : info.apex;
+    const t = core.vDot(core.vSub(p, o), info.axis);
+    const onAxis = core.vAdd(o, core.vScale(info.axis, t));
+    const radius = core.vDist(p, onAxis);
+    const axisLine = info.type === 'cylinder'
+      ? [info.axisStart, info.axisEnd]
+      : [info.apex, core.vAdd(info.apex, core.vScale(info.axis, Math.max(t, info.radiusMax / Math.tan(info.halfAngle))))];
+    return { type: 'radius', radius: info.type === 'cylinder' ? info.radius : radius, info, a: onAxis, b: p, axisLine };
+  }
+  if (info.type === 'sphere') {
+    const p = at || core.vAdd(info.center, [info.radius, 0, 0]);
+    return { type: 'radius', radius: info.radius, info, a: info.center, b: p };
+  }
+  return null;
+}
+
+// ---- preview (rubber band) ----
+function clearPreview() {
+  if (!preview) return;
+  preview.label.removeFromParent();
+  preview.group.removeFromParent();
+  preview.group.traverse((o) => o.geometry?.dispose());
+  preview = null;
+}
+function showPreview(a, b, text) {
+  clearPreview();
+  const group = new THREE.Group();
+  group.add(makeLine([a, b], mat.measureLine), makeDots([a, b]));
+  const label = makeLabel(core.vLerp(a, b, 0.5), text, 'preview');
+  group.add(label);
+  overlay.add(group);
+  preview = { group, label };
+}
+
+// ======================================================================
+// Tools / interaction
+// ======================================================================
+const HINTS = {
+  inspect: 'Inspect: hover to preview, click a face, edge or vertex to see its geometry. Double-click sets the rotation pivot.',
+  distance: 'Distance: click two points. Snaps to vertices, circle centers, midpoints and edges.',
+  min: 'Min distance: click two entities (face, edge or vertex) to get the shortest distance between them.',
+  radius: 'Radius: click a circular edge, or a cylindrical / spherical / conical face.',
+};
+
+function setHint(text) { $('hint').textContent = text; }
+
+function setMode(mode) {
+  state.mode = mode;
+  cancelPending();
+  for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
+  setHint(model ? HINTS[mode] : 'Open a file to begin.');
+  if (mode !== 'inspect') { state.selectedEntity = null; showEntity(null, hl.facePicked, hl.edgePicked); }
+  requestRender();
+}
+
+function cancelPending() {
+  state.first = null;
+  clearPreview();
+  if (state.mode !== 'inspect') showEntity(null, hl.facePicked, hl.edgePicked);
+  if (model) setHint(HINTS[state.mode]);
+  requestRender();
+}
+
+function setHover(p) {
+  state.hover = p;
+  const mode = state.mode;
+  const ent = mode === 'distance' ? null : entityFromPick(p, mode);
+  showEntity(ent && ent.kind !== 'point' ? ent : null, hl.faceHover, hl.edgeHover);
+  hoverSnap = p && (mode === 'distance' || p.kind === 'vertex' || p.kind === 'center' || p.kind === 'mid' || (mode === 'min' && p.kind === 'edge')) ? p : null;
+  if (mode === 'distance' && p && p.kind === 'face') hoverSnap = p;
+  placeSnapMarker(hoverSnap);
+  $('coords').textContent = p ? `X ${fmtLen(p.point[0], false)}  Y ${fmtLen(p.point[1], false)}  Z ${fmtLen(p.point[2])}` : '';
+  if (mode === 'inspect' && !state.selectedEntity) showInfo(ent);
+  if (mode === 'distance' && state.first) {
+    if (p) {
+      const d = core.vDist(state.first.point, p.point);
+      showPreview(state.first.point, p.point, fmtLen(d));
+    } else clearPreview();
+  }
+  requestRender();
+}
+
+function onClick(p, ev) {
+  const mode = state.mode;
+  if (mode === 'inspect') {
+    const ent = entityFromPick(p, mode);
+    state.selectedEntity = ent;
+    showEntity(ent && ent.kind !== 'point' ? ent : null, hl.facePicked, hl.edgePicked);
+    showInfo(ent);
+    requestRender();
+    return;
+  }
+  if (!p) { cancelPending(); return; }
+
+  if (mode === 'distance') {
+    if (!state.first) {
+      state.first = { point: p.point, what: SNAP_LABEL[p.kind] };
+      setHint('Distance: click the second point (Esc cancels).');
+    } else {
+      const a = state.first.point, b = p.point, whatA = state.first.what;
+      clearPreview();
+      state.first = null;
+      addMeasurement({ type: 'distance', distance: core.vDist(a, b), a, b, what: [whatA, SNAP_LABEL[p.kind]] });
+      setHint(HINTS.distance);
+    }
+    return;
+  }
+
+  if (mode === 'min') {
+    const ent = entityFromPick(p, mode);
+    if (!state.first) {
+      state.first = ent;
+      showEntity(ent.kind !== 'point' ? ent : null, hl.facePicked, hl.edgePicked);
+      setHint(`Min distance: first = ${entityName(ent)}. Click the second entity (Esc cancels).`);
+    } else {
+      const ms = computeMinDistance(state.first, ent);
+      state.first = null;
+      showEntity(null, hl.facePicked, hl.edgePicked);
+      if (ms) addMeasurement(ms);
+      setHint(HINTS.min);
+    }
+    requestRender();
+    return;
+  }
+
+  if (mode === 'radius') {
+    const ent = entityFromPick(p, mode);
+    const ms = computeRadius(ent);
+    if (ms) addMeasurement(ms);
+    else toast(`No radius: this is a ${TYPE_NAME[entityInfo(ent).type].toLowerCase()}.`, true);
+  }
+}
+
+// pointer handling (distinguish clicks from orbit drags)
+let down = null, hoverQueued = false, lastMove = null;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button === 0) down = { x: e.clientX, y: e.clientY, t: performance.now() };
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (e.button !== 0 || !down) return;
+  const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+  down = null;
+  if (moved > 4) return;
+  const p = pick(e.clientX, e.clientY);
+  onClick(p, e);
+  setHover(p);
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  lastMove = e;
+  if (e.buttons !== 0) { if (hoverSnap) { hoverSnap = null; placeSnapMarker(null); } return; }
+  if (hoverQueued) return;
+  hoverQueued = true;
+  requestAnimationFrame(() => {
+    hoverQueued = false;
+    setHover(pick(lastMove.clientX, lastMove.clientY));
+  });
+});
+renderer.domElement.addEventListener('pointerleave', () => { if (state.hover) setHover(null); });
+renderer.domElement.addEventListener('dblclick', (e) => {
+  const p = pick(e.clientX, e.clientY);
+  if (!p) return;
+  controls.target.fromArray(p.point);
+  controls.update();
+  requestRender();
+});
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// ======================================================================
+// Loading
+// ======================================================================
+function busy(text) {
+  $('busy').classList.toggle('on', !!text);
+  if (text) $('busy-text').textContent = text;
+}
+let toastTimer = 0;
+function toast(text, info = false) {
+  const el = $('toast');
+  el.textContent = text;
+  el.className = info ? 'info' : '';
+  el.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.style.display = 'none'; }, info ? 3500 : 8000);
+}
+
+function extOf(name) {
+  const m = /\.([a-z0-9]+)$/i.exec(name || '');
+  return m ? m[1].toLowerCase() : 'step';
+}
+
+let occtWarm = false;
+async function loadBytes(bytes, name) {
+  const seq = ++loadSeq;
+  lastFile = { bytes, name };
+  const t0 = performance.now();
+  busy(occtWarm ? 'Reading ' + name + '…' : 'Loading OpenCascade (≈7 MB, first time only)…');
+  try {
+    const q = QUALITY[settings.quality];
+    const params = { linearUnit: 'millimeter', linearDeflectionType: 'bounding_box_ratio', ...q };
+    const data = await parser.parse(bytes, extOf(name), params, (msg) => { if (seq === loadSeq) busy(msg); });
+    occtWarm = true;
+    if (seq !== loadSeq) return;
+    if (!data.meshes.length) throw new Error('The file contains no solid or surface geometry.');
+    busy('Building scene…');
+    await new Promise((r) => setTimeout(r, 0));
+    setModel(data, name, Math.round(performance.now() - t0));
+  } catch (err) {
+    console.error(err);
+    if (seq === loadSeq) toast(String(err.message || err));
+  } finally {
+    if (seq === loadSeq) busy(null);
+  }
+}
+
+async function loadFile(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  await loadBytes(buf, file.name);
+}
+
+async function loadUrl(url) {
+  busy('Downloading…');
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} while downloading ${url}`);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    const name = decodeURIComponent(new URL(url, location.href).pathname.split('/').pop() || 'model.step');
+    await loadBytes(buf, name);
+  } catch (err) {
+    busy(null);
+    toast(String(err.message || err));
+    throw err;
+  }
+}
+
+$('btn-open').addEventListener('click', () => $('file-input').click());
+$('btn-open-2').addEventListener('click', () => $('file-input').click());
+$('btn-sample').addEventListener('click', async () => {
+  try {
+    busy('Loading sample…');
+    if (!window.SAMPLE_STEP) await loadScript('vendor/sample.js');
+    const { name, b64 } = window.SAMPLE_STEP;
+    await loadBytes(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)), name);
+  } catch (err) {
+    busy(null);
+    toast(String(err.message || err));
+  }
+});
+$('file-input').addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (f) loadFile(f);
+  e.target.value = '';
+});
+
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => { if (e.dataTransfer?.types.includes('Files')) { dragDepth++; document.body.classList.add('dragging'); e.preventDefault(); } });
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0; document.body.classList.remove('dragging');
+  const f = e.dataTransfer?.files?.[0];
+  if (f) loadFile(f);
+});
+
+// ======================================================================
+// Toolbar & keyboard
+// ======================================================================
+for (const b of document.querySelectorAll('[data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
+$('btn-fit').addEventListener('click', () => fitObject(modelRoot));
+$('sel-view').addEventListener('change', (e) => { if (e.target.value) setView(e.target.value); e.target.value = ''; });
+$('btn-ortho').addEventListener('click', () => setOrtho(!settings.ortho));
+$('btn-edges').addEventListener('click', () => {
+  settings.edges = !settings.edges;
+  $('btn-edges').setAttribute('aria-pressed', String(settings.edges));
+  if (model) for (const m of model.meshes) m.lines.visible = settings.edges;
+  requestRender();
+});
+$('btn-colors').addEventListener('click', () => {
+  settings.colors = !settings.colors;
+  $('btn-colors').setAttribute('aria-pressed', String(settings.colors));
+  if (model) for (const m of model.meshes) {
+    m.mesh.geometry.setAttribute('color', new THREE.BufferAttribute(meshColorArray(m, settings.colors), 3));
+  }
+  requestRender();
+});
+$('sel-quality').addEventListener('change', (e) => {
+  settings.quality = e.target.value;
+  if (lastFile) {
+    if (state.list.length) toast('Re-tessellating: measurements were cleared.', true);
+    loadBytes(lastFile.bytes, lastFile.name);
+  }
+});
+$('sel-units').addEventListener('change', (e) => { settings.units = e.target.value; refreshMeasureTexts(); });
+$('sel-precision').addEventListener('change', (e) => { settings.precision = Number(e.target.value); refreshMeasureTexts(); });
+$('btn-clear').addEventListener('click', clearMeasurements);
+
+const VIEW_KEYS = { 1: 'iso', 2: 'front', 3: 'back', 4: 'left', 5: 'right', 6: 'top', 7: 'bottom' };
+window.addEventListener('keydown', (e) => {
+  if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'escape') {
+    if (state.first) cancelPending();
+    else if (state.selectedEntity) { state.selectedEntity = null; showEntity(null, hl.facePicked, hl.edgePicked); showInfo(null); requestRender(); }
+    else if (state.selectedMeasure) selectMeasurement(null);
+  }
+  else if (k === 'i') setMode('inspect');
+  else if (k === 'd') setMode('distance');
+  else if (k === 'm') setMode('min');
+  else if (k === 'r') setMode('radius');
+  else if (k === 'f') fitObject(modelRoot);
+  else if (k === 'o') setOrtho(!settings.ortho);
+  else if (k === 'e') $('btn-edges').click();
+  else if (VIEW_KEYS[k]) setView(VIEW_KEYS[k]);
+  else if ((k === 'delete' || k === 'backspace') && state.selectedMeasure) { removeMeasurement(state.selectedMeasure); e.preventDefault(); }
+  else return;
+});
+
+setMode('inspect');
+resize();
+
+// ======================================================================
+// Scripting / test hook
+// ======================================================================
+function resolveEntity(ref) {
+  if (ref.point) return { kind: 'point', point: ref.point, label: 'Point' };
+  if (ref.face) return { kind: 'face', mesh: model.meshes[ref.face[0]], id: ref.face[1], at: ref.at };
+  if (ref.edge) return { kind: 'edge', mesh: model.meshes[ref.edge[0]], id: ref.edge[1], at: ref.at };
+  throw new Error('Entity ref must be {point:[x,y,z]} | {face:[mesh, face]} | {edge:[mesh, edge]}');
+}
+function serialize(ms) {
+  return { id: ms.id, type: ms.type, value: ms.type === 'radius' ? ms.radius : ms.distance, a: ms.a, b: ms.b, angle: ms.angle, perpendicular: ms.perpendicular, text: measureText(ms) };
+}
+window.stepViewer = {
+  core, THREE,
+  get model() { return model; },
+  get camera() { return camera; },
+  load: (src, name) => (typeof src === 'string' ? loadUrl(src) : loadBytes(new Uint8Array(src), name || 'model.step')),
+  faceInfo: (mi, f) => faceInfo(model.meshes[mi], f),
+  edgeInfo: (mi, e) => edgeInfo(model.meshes[mi], e),
+  minDistance: (a, b) => { const ms = computeMinDistance(resolveEntity(a), resolveEntity(b)); return ms && { distance: ms.distance, a: ms.a, b: ms.b, angle: ms.angle, perpendicular: ms.perpendicular }; },
+  radius: (ref) => { const ms = computeRadius(resolveEntity(ref)); return ms && { radius: ms.radius, type: ms.info.type, center: ms.info.center }; },
+  screenOf: (p) => { const r = renderer.domElement.getBoundingClientRect(); const s = toScreen(p); return { x: r.left + s[0], y: r.top + s[1] }; },
+  setMode, setView, setOrtho,
+  measurements: () => state.list.map(serialize),
+};
+
+const qp = new URLSearchParams(location.search).get('model');
+if (qp) loadUrl(qp).catch(() => {});
+</script>
+</body>
+</html>

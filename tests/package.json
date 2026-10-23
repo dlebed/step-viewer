@@ -1,0 +1,16 @@
+{
+  "name": "step-viewer-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "e2e": "node e2e.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.10",
+    "occt-import-js": "0.0.23",
+    "puppeteer-core": "24.43.1",
+    "three": "0.186.1",
+    "three-mesh-bvh": "0.9.16"
+  }
+}
