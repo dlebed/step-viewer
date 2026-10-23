@@ -188,6 +188,32 @@ check(isOrtho, 'O toggles orthographic camera');
 await page.screenshot({ path: path.join(outDir, 'assembly.png') });
 
 check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
+
+// ------------------------------------------------------------ served over http: installable app (PWA), works offline
+const appServer = await startServer(0);
+const app = await browser.newPage();
+const appErrors = [];
+app.on('pageerror', (e) => appErrors.push(String(e)));
+await app.goto(`http://127.0.0.1:${appServer.address().port}/step-viewer.html`);
+const swReady = await app.evaluate(() => Promise.race([navigator.serviceWorker.ready.then(() => true), new Promise((r) => setTimeout(r, 30000, false))]));
+check(swReady, 'service worker registered and app files cached');
+const cdp = await app.createCDPSession();
+const { installabilityErrors } = await cdp.send('Page.getInstallabilityErrors');
+check(installabilityErrors.length === 0, `installable as an app${installabilityErrors.length ? ': ' + installabilityErrors.map((e) => e.errorId).join(', ') : ''}`);
+const { errors: manifestErrors } = await cdp.send('Page.getAppManifest');
+check(manifestErrors.length === 0, `manifest parses${manifestErrors.length ? ': ' + manifestErrors.map((e) => e.message).join(' | ') : ''}`);
+await app.setOfflineMode(true);
+await app.reload();
+await app.waitForFunction(() => window.stepViewer, { timeout: 10000 }).catch(() => {});
+const cubeB64 = fs.readFileSync(path.join(here, 'fixtures', 'cube-10x10.stp')).toString('base64');
+const offlineParts = await app.evaluate(async (b64) => {
+  if (!window.stepViewer) return -1;
+  await window.stepViewer.load(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer, 'cube.stp');
+  return window.stepViewer.model ? window.stepViewer.model.meshes.length : 0;
+}, cubeB64).catch(() => -1);
+check(offlineParts === 1, `offline: starts from the cache and parses a file with OpenCascade (${offlineParts} part)`);
+check(appErrors.length === 0, `no page errors over http${appErrors.length ? ': ' + appErrors.join(' | ') : ''}`);
+appServer.close();
 await browser.close();
 server?.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nall E2E checks passed');

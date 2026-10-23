@@ -19,6 +19,15 @@ The remaining files in `vendor/` are the original library files the bundles are 
 
 You can also load a model from a URL: `step-viewer.html?model=https://…/part.step` (the server must allow CORS).
 
+## Install as an app
+
+Served over http(s), the viewer is a progressive web app. Chrome and Edge show an **Install** icon in the address bar; on Android use *Add to Home screen*. The installed app:
+
+- opens in its own window and works offline. `sw.js` caches the page and the `vendor/` bundles (about 13 MB, including OpenCascade) and refreshes them in the background, so an update shows on the next start;
+- is offered in the OS *Open with* menu for `.step`, `.stp`, `.iges`, `.igs`, `.brep` and `.brp` files.
+
+Run `node serve.mjs` and open `http://localhost:8080/step-viewer.html`, or put the folder on any static HTTPS host. Browsers allow installing only from `localhost` or HTTPS. Opened from `file://`, the page stays a plain page.
+
 ## Tools
 
 | Tool | Key | What it does |
@@ -58,7 +67,7 @@ npm run e2e            # headless Chrome drives the real UI; screenshots land in
 
 The unit tests pull the geometry core straight out of `step-viewer.html` (the `<script id="core-src">` block), so they exercise exactly the code the page runs.
 
-The E2E run needs Chrome (set `$CHROME` if it isn't in a standard location). It opens the page from `file://`. Set `E2E_HTTP=1` to serve it through `serve.mjs` instead. No network access is needed.
+The E2E run needs Chrome (set `$CHROME` if it isn't in a standard location). It opens the page from `file://`. Set `E2E_HTTP=1` to serve it through `serve.mjs` instead. It then serves the page over http and checks that Chrome reports it as installable and that it starts and parses a file offline. No network access is needed.
 
 Fixtures in `tests/fixtures/`:
 - A 10 mm cube.

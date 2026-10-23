@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>STEP Viewer</title>
 <meta name="description" content="Single-page STEP/IGES/BREP viewer with snapping distance, minimum-distance and radius measurements. Runs fully in the browser on OpenCascade (WASM) + three.js.">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c2026" media="(prefers-color-scheme: dark)">
+<script>
+  // Installable app (PWA) when served over http(s). Opened from file:// it stays a plain page.
+  if (/^https?:$/.test(location.protocol)) {
+    document.head.insertAdjacentHTML('beforeend', '<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icons/icon.svg"><link rel="apple-touch-icon" href="icons/icon-192.png">');
+    if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+</script>
 <style>
   :root {
     color-scheme: light dark;
@@ -2392,6 +2401,14 @@ window.stepViewer = {
 
 const qp = new URLSearchParams(location.search).get('model');
 if (qp) loadUrl(qp).catch(() => {});
+// installed app: a file opened from the OS (manifest file_handlers)
+if ('launchQueue' in window) {
+  launchQueue.setConsumer(async ({ files }) => {
+    if (!files || !files.length) return;
+    const f = await files[0].getFile();
+    await loadBytes(new Uint8Array(await f.arrayBuffer()), f.name);
+  });
+}
 </script>
 </body>
 </html>

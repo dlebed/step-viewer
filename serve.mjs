@@ -9,6 +9,7 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.wasm': 'application/wasm', '.json': 'application/json', '.css': 'text/css',
+  '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png',
 };
 
 export function startServer(port = 8080) {
